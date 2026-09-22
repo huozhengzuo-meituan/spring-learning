@@ -1,0 +1,1535 @@
+[
+  {
+    "id": 25,
+    "slug": "redis-models-ttl",
+    "title": "Redis：从数据模型到 TTL",
+    "phase": "05 · Redis 与缓存",
+    "minutes": 30,
+    "prerequisites": [
+      "关系型数据建模与SQL基础",
+      "基础设施集成验证"
+    ],
+    "goal": "为任务详情、成员集合和排行榜选择结构，并亲眼验证过期行为。",
+    "bridge": "前端 Map 很熟悉，但 Redis 是跨进程共享状态：每次访问有网络成本，所有实例都可能改同一个键。",
+    "sections": [
+      {
+        "title": "先按访问方式建模",
+        "html": "<p>缓存详情可以用 String 存一个 JSON 快照；局部修改多个字段适合 Hash；唯一成员用 Set；按截止时间排序用 Sorted Set。选型先写“我要如何读写”，再选命令，不要因为关系数据库有一张表就照搬一个巨型 Hash。任务系统的键可以写成 <code>course:task:v1:42</code>：业务前缀防止冲突，版本前缀支持数据格式升级，标识符定位实体。键中不要包含密码或完整访问令牌。一个集合越大，完整读取它对网络、内存和事件循环的压力越大。</p>"
+      },
+      {
+        "title": "运行一次完整生命周期",
+        "html": "<p>在根目录启动 Compose 的 redis 服务，然后进入 CLI；下面只改 course 前缀的学习数据。EX 秒和 PX 毫秒很容易混淆，SET 时一起设过期避免两条命令中间崩溃。TTL 返回 -2 表示键不存在，-1 表示没有过期时间，正数是剩余秒数。缓存时效是业务约定，不是数据一致性证明。</p><pre><code>docker compose up -d redis\ndocker compose exec redis redis-cli\nSET course:task:v1:42 &#x27;{&quot;title&quot;:&quot;学习事务&quot;}&#x27; EX 60\nGET course:task:v1:42\nTTL course:task:v1:42\nHSET course:member:7 name Lin role writer\nSADD course:team:3 7 8 7\nSCARD course:team:3\nZADD course:due 1800000000 42 1800000300 43\nZRANGE course:due 0 -1 WITHSCORES</code></pre>"
+      },
+      {
+        "title": "一个容易漏掉的覆盖规则",
+        "html": "<p>对有 TTL 的键再次执行普通 SET，会替换值并移除原 TTL；需要保留时用 KEEPTTL，需要刷新时重新指定 EX。Hash 中更新字段与替换整个键的行为不同，因此不要笼统记成“写操作都刷新 TTL”。读取后在客户端减 TTL 再写回也会制造并发窗口。键消失还可能来自淘汰、主动删除或服务重建；排查时要同时检查过期、内存策略和部署记录。Redis 保存的是缓存副本时，丢失应能从数据库重建。</p>"
+      },
+      {
+        "title": "把数据量当成设计输入",
+        "html": "<p>假设有十万条详情，每条一 KB，不能只把数值相乘当成所需内存：还有键、对象结构、连接缓冲、复制和持久化开销。先从真实样本测 MEMORY USAGE，再评估命中率和总量。遍历学习键用 SCAN；不要在生产大库直接 KEYS *。分页扫描期间数据可能改变，因此 SCAN 不是事务快照。任务详情、排行和权限可能要求不同的过期策略；权限校验不能依赖一份没有失效机制的陈旧缓存。</p><p>一手阅读：<a href=\"https://redis.io/docs/latest/develop/data-types/\">Redis 数据结构</a>；<a href=\"https://redis.io/docs/latest/commands/expire/\">EXPIRE 语义</a>。带着本课实验的输出阅读；有任何不清楚的步骤，可以直接把命令和结果发给学习助手继续追问。</p><p>遇到WRONGTYPE时，先用TYPE检查键结构，不要为了让命令成功而直接删除业务键。串行执行两个网络请求通常比一次批量读取更慢，但批量也必须限制返回体大小。实验记录应把键名、类型、生命周期、重建来源放在同一张表，未来修改格式时才知道哪些消费者会受影响。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "覆盖带 TTL 的键且仍需保留剩余寿命，应选择什么？",
+      "options": [
+        "普通覆盖写入",
+        "保留过期写入",
+        "先读后删写入"
+      ],
+      "answer": 1,
+      "explanation": "使用 SET key value KEEPTTL；普通 SET 会清除原有过期设置，分步删除重写有并发窗口。"
+    },
+    "exercise": {
+      "task": "验证 SET 覆盖值对 TTL 的影响，并证明 Set 会去重。",
+      "steps": [
+        "执行 SET course:ttl a EX 60，再执行 TTL。",
+        "执行 SET course:ttl b，再执行 TTL；解释结果。",
+        "重新设 EX 60，使用 SET course:ttl c KEEPTTL；检查 TTL。",
+        "执行 SADD course:test:set x x y，再执行 SCARD。"
+      ],
+      "expected": "普通覆盖后 TTL 为 -1；KEEP TTL 后仍为正数；集合成员数为 2。",
+      "solution": "TTL不是独立于键生命周期的永久属性。把过期与写值放在同一条命令；Set的唯一性由成员值决定。"
+    },
+    "sources": [
+      {
+        "title": "Redis 数据结构",
+        "url": "https://redis.io/docs/latest/develop/data-types/"
+      },
+      {
+        "title": "EXPIRE 语义",
+        "url": "https://redis.io/docs/latest/commands/expire/"
+      }
+    ],
+    "lab": "独立 Redis CLI；使用根 compose.yaml 的 redis 服务"
+  },
+  {
+    "id": 26,
+    "slug": "spring-cache-consistency",
+    "title": "Spring Cache 与 cache-aside 一致性",
+    "phase": "05 · Redis 与缓存",
+    "minutes": 30,
+    "prerequisites": [
+      "第25课：Redis 数据模型",
+      "事务与代理基础"
+    ],
+    "goal": "画出缓存与数据库并发时序，区分注解简化与一致性保证。",
+    "bridge": "像前端查询缓存一样，后端缓存也要设计 key、失效和陈旧窗口；但后端有多副本和数据库事务。",
+    "sections": [
+      {
+        "title": "先明确谁保存真实数据",
+        "html": "<p>cache-aside 的读取是：查缓存，未命中再查数据库，回填缓存后返回。写入通常先提交数据库，再删除相应缓存。数据库是事实来源，缓存是可重建副本。Spring Cache 是抽象层，可以接本地缓存或 Redis；<code>@Cacheable</code> 让一次成功计算可复用，<code>@CacheEvict</code> 表达删除。它们不替你定义可接受的陈旧时间，更不把数据库与 Redis 组成一个原子事务。不同用户看到的任务权限不同，key 必须考虑数据作用域。</p>"
+      },
+      {
+        "title": "读懂注解背后的拦截",
+        "html": "<p>下面是独立教学片段，需要启用缓存并提供 CacheManager；不是给现有项目直接加上的已验证功能。<code>#p0</code> 用参数位置避免依赖编译保留的参数名。默认代理模式下，同一对象内部自调用不会经过缓存代理。返回 DTO 比缓存持久化实体更容易控制序列化与版本。Redis Cache 的 TTL、空值策略和序列化器需要显式设计；Boot 4 的 Jackson 3 生态下尤其不要照搬旧教程的类型和配置。</p><pre><code>@Cacheable(cacheNames = &quot;task-detail&quot;, key = &quot;#p0&quot;)\npublic TaskView find(long id) {\n    return repository.loadView(id); // 教学片段：由调用方承担不存在语义\n}\n\n// 使用独立的提交后事件处理器删除缓存，避免事务未提交先删。\n@TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)\npublic void invalidate(TaskChanged event) {\n    cacheManager.getCache(&quot;task-detail&quot;).evict(event.id());\n}</code></pre>"
+      },
+      {
+        "title": "提交后删除仍然存在竞争",
+        "html": "<p>时间线：读请求 A 缓存未命中，读取数据库旧值 v1；写请求 B 提交 v2 并删除缓存；A 最后把 v1 放回缓存。虽然 B 完全遵守先写后删，旧数据仍可存活到 TTL。删除也可能因为 Redis 断开而失败。根据业务选择短 TTL、可靠失效事件、带版本的回填控制，或对强一致读取绕过缓存。延迟双删只是缩小某些窗口，不能凭一个固定睡眠时间证明所有并发和故障情形都正确。</p>"
+      },
+      {
+        "title": "观察命中并保留降级预算",
+        "html": "<p>先测数据库查询次数，再谈缓存命中率；命中很高但详情长期陈旧也不是成功。定义指标：命中、未命中、回源耗时、删除失败数、读取到的业务版本。Redis 超时后能否回源取决于数据库余量，不能无限并发回源。task-service 中已实现哪些缓存路径应以项目 README 和测试为准；本课目标是审查设计以及完成一个可复现实验，不要求把所有读操作一股脑缓存。你应能解释为什么列表页缓存比单条详情更难失效。</p><p>一手阅读：<a href=\"https://docs.spring.io/spring-framework/reference/integration/cache/annotations.html\">Spring Cache 注解</a>；<a href=\"https://docs.spring.io/spring-data/redis/reference/redis/redis-cache.html\">Redis Cache 配置</a>。带着本课实验的输出阅读；有任何不清楚的步骤，可以直接把命令和结果发给学习助手继续追问。</p><p>还要检查事务事件的注册位置：只有在实际事务中发布，提交后监听语义才有意义；异步监听失败仍需可靠记录和重试。对于课堂练习，先用时序图证明你接受的陈旧窗口，再决定引入何种补偿，避免把越来越多注解误当成越来越强的一致性。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "数据库事务提交成功且缓存删除成功，可以推出什么？",
+      "options": [
+        "所有读取强一致",
+        "所有请求无重复",
+        "仍有并发旧回填"
+      ],
+      "answer": 2,
+      "explanation": "先读旧值再延迟回填的请求，可能发生在提交后删除之后；需要额外设计或接受有界陈旧。"
+    },
+    "exercise": {
+      "task": "用三个 Redis 命令模拟旧值回填，记录失效策略的边界。",
+      "steps": [
+        "将纸上的数据库值写为 v1，读请求 A 记录 v1 但暂不回填。",
+        "把纸上数据库更新为 v2，然后 DEL course:race。",
+        "模拟 A 执行 SET course:race v1 EX 30，再 GET。",
+        "写出“可陈旧30秒”和“写后立即读新值”两种需求的不同方案。"
+      ],
+      "expected": "缓存为 v1，数据库为 v2；命令全部成功仍会出现陈旧。",
+      "solution": "对有界陈旧可用短TTL和失败失效补偿；写后强一致读可绕过缓存读主库，不能仅靠CacheEvict承诺。"
+    },
+    "sources": [
+      {
+        "title": "Spring Cache 注解",
+        "url": "https://docs.spring.io/spring-framework/reference/integration/cache/annotations.html"
+      },
+      {
+        "title": "Redis Cache 配置",
+        "url": "https://docs.spring.io/spring-data/redis/reference/redis/redis-cache.html"
+      }
+    ],
+    "lab": "独立 Redis CLI + 时序设计实验"
+  },
+  {
+    "id": 27,
+    "slug": "cache-stampede-protection",
+    "title": "穿透、击穿、雪崩：把回源流量限制住",
+    "phase": "05 · Redis 与缓存",
+    "minutes": 30,
+    "prerequisites": [
+      "第26课：缓存一致性"
+    ],
+    "goal": "根据故障的流量形状选择保护措施，并计算缓存失效时的数据库压力。",
+    "bridge": "前端 debounce 合并一次操作；后端必须合并多个线程甚至多个实例对同一热点键的回源。",
+    "sections": [
+      {
+        "title": "三个名字对应三个不同输入",
+        "html": "<p>穿透是请求不存在的数据，缓存和数据库都找不到却反复查询；击穿是一个极热点键失效后大量请求一起回源；雪崩是许多键同时失效或者整个缓存不可用。先观察“哪些 key、何时、多少请求”再定策略。对不存在资源短暂缓存明确的空结果，可以减少重复查找，但必须区分“确定不存在”和“数据库报错”。把故障当空值缓存，会把短暂错误变成持续假404。所有回源都要受并发和时间预算约束。</p>"
+      },
+      {
+        "title": "给保护措施配上代价",
+        "html": "<p>负缓存需要短 TTL 以及资源新建后的失效，否则刚创建的数据暂时看不到；Bloom filter 能快速排除明确不存在的集合成员，但“可能存在”仍要查询，而且过滤器的数据更新也是系统的一部分。热点重建可以做单进程 single-flight，多副本场景需要各自预算或额外协调。对允许陈旧的数据可以返回旧值并异步刷新。随机 TTL 分散失效时刻，不能修复 Redis 整体断网。每个策略都要写出代价与不适用数据。</p>"
+      },
+      {
+        "title": "先做一个容量计算",
+        "html": "<p>假设总流量 2000 次每秒，正常命中率 95%，数据库只承受约 100 次每秒；缓存完全失效后可能变成 2000 次每秒。数据库容量若是 300 次每秒，仅增加重试会使故障更重。应限制回源并发、限制等待队列，并对非关键功能快速失败或返回明确的陈旧数据。下面在 jshell 中计算 TTL 抖动范围，只展示策略，不构成完整缓存实现。</p><pre><code>import java.util.concurrent.ThreadLocalRandom;\nint baseSeconds = 300;\nint ttl = baseSeconds + ThreadLocalRandom.current().nextInt(0, 61);\nSystem.out.println(ttl); // 每个键分散到300~360秒\ndouble originQps = 2000 * (1 - 0.95);\nSystem.out.println(originQps); // 约100次/秒</code></pre>"
+      },
+      {
+        "title": "演练要有停止条件",
+        "html": "<p>只在隔离的开发环境演练。先记录正常数据库延迟与连接池占用，再只删除一个课程键观察回源；下一步才模拟缓存不可达。设定停止条件，例如错误率超过百分之一或连接池等待持续增加就结束实验。成功证据包括回源峰值有上限、没有无界队列、缓存恢复后命中回升、负缓存没有掩盖系统错误。日志里记录保护策略选择而非每次输出整份业务数据。能说明未命中原因，比背诵三个术语更有价值。</p><p>一手阅读：<a href=\"https://redis.io/docs/latest/develop/reference/eviction/\">Redis 淘汰策略与内存限制</a>；<a href=\"https://docs.spring.io/spring-data/redis/reference/redis/redis-cache.html\">Spring Redis Cache</a>。带着本课实验的输出阅读；有任何不清楚的步骤，可以直接把命令和结果发给学习助手继续追问。</p><p>热点保护还要给等待者设置超时；如果负责重建的请求失败，其他请求必须能得到失败或重试机会，不能永远等待一个不会完成的结果。单进程请求合并的测试可以用十个并发调用和一次被计数的回源函数，检查同一键被合并，不同键仍可独立推进。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "整个 Redis 不可用时，哪项措施直接限制数据库冲击？",
+      "options": [
+        "限制回源并发",
+        "延长热点寿命",
+        "扩大空值范围"
+      ],
+      "answer": 0,
+      "explanation": "TTL与空值都依赖缓存正常可用。缓存不可用时，回源并发、队列和超时预算才直接保护数据库。"
+    },
+    "exercise": {
+      "task": "为任务详情写一张可执行的缓存故障处理表。",
+      "steps": [
+        "列出不存在ID、单热点过期、所有缓存断连三类输入。",
+        "分别填写返回内容、TTL或等待上限、最大回源并发。",
+        "用2000 QPS和95%命中率计算正常回源量。",
+        "增加资源新建和数据库报错两例，检查负缓存是否误伤。"
+      ],
+      "expected": "至少五个场景均有明确反馈；正常回源100 QPS，完全失效20倍，预算不能缺失。",
+      "solution": "不存在可短暂负缓存；热点用请求合并；整体故障用有界回源和降级。数据库异常必须返回或记录真实失败，不能伪装为资源不存在。"
+    },
+    "sources": [
+      {
+        "title": "Redis 淘汰策略与内存限制",
+        "url": "https://redis.io/docs/latest/develop/reference/eviction/"
+      },
+      {
+        "title": "Spring Redis Cache",
+        "url": "https://docs.spring.io/spring-data/redis/reference/redis/redis-cache.html"
+      }
+    ],
+    "lab": "独立 jshell + 故障设计实验"
+  },
+  {
+    "id": 28,
+    "slug": "redis-lua-lock-rate-limit",
+    "title": "Redis 原子操作、Lua、锁与限流",
+    "phase": "05 · Redis 与缓存",
+    "minutes": 30,
+    "prerequisites": [
+      "第25课：TTL",
+      "第27课：缓存保护"
+    ],
+    "goal": "用原子脚本保证计数与过期一起完成，并说明租约锁的边界。",
+    "bridge": "浏览器中一次函数同步执行不代表远端多条请求原子；客户端先 GET 再 SET 会让多个请求互相覆盖。",
+    "sections": [
+      {
+        "title": "原子操作保护的是什么",
+        "html": "<p>INCR 将一个键的读取和递增放在 Redis 内部完成；多条客户端命令依旧可以被其他客户端穿插。Lua 脚本在服务器上执行，可以把有限的一组操作组合起来，执行期间不会插入其他普通命令。这个优势也意味着长脚本会拖慢整个实例。脚本不是数据库回滚事务：脚本运行时已经成功的写入，不会因为后续命令报错自动撤销。先检查参数，再做写入，且所有 key 通过 KEYS 显式传递。</p>"
+      },
+      {
+        "title": "一个可运行的固定窗口限流器",
+        "html": "<p>下面最多允许同一键在首次请求后的十秒内通过三次。计数与设置过期放在同一个脚本，避免 INCR 后客户端崩溃导致计数永不过期。调用 EVAL 的 1 代表一个 key，随后是窗口毫秒与限额。它适合演示原子性；固定窗口在边界可能短时放过接近两倍限额，因此更平滑的要求需令牌桶或滑动窗口。</p><pre><code>docker compose exec redis redis-cli EVAL &#x27;local n=redis.call(&quot;INCR&quot;,KEYS[1]); if n==1 then redis.call(&quot;PEXPIRE&quot;,KEYS[1],ARGV[1]); end; if n&lt;=tonumber(ARGV[2]) then return 1 else return 0 end&#x27; 1 course:limit:user7 10000 3\n# 在10秒内执行4次：前三次1，第四次0。\ndocker compose exec redis redis-cli PTTL course:limit:user7</code></pre>"
+      },
+      {
+        "title": "租约锁不能替代业务约束",
+        "html": "<p>单实例获取锁可用 SET key 随机token NX PX 5000；释放必须比较 token 相同再删除，不能直接 DEL。否则持有者 A 暂停超过五秒，B 已拿到新锁，A 恢复后会误删 B 的锁。即使正确释放，过期的 A 仍可能继续操作外部数据库，锁本身阻止不了它。对库存、金额等正确性要求高的写入，仍要数据库条件更新、唯一约束，必要时由下游拒绝旧 fencing token。复制故障切换也可能丢失刚写的锁。</p>"
+      },
+      {
+        "title": "检查工作负载和失败路径",
+        "html": "<p>限流必须决定 Redis 不可用时是放行还是拒绝：公开写接口通常需要更保守的保护，非关键读取可能使用本地预算降级。不要把每个随机请求ID用作限流key，那会失去用户维度聚合并制造大量键。Cluster 中多key原子脚本要求键落在同一哈希槽；不要为了跨实体原子性把所有键都塞进同一个槽。这里的脚本没有写入真实任务，练习结束可让学习键自然过期。把“谁被限制、多久、最多多少、失败怎么处理”写成接口约定。</p><p>一手阅读：<a href=\"https://redis.io/docs/latest/commands/eval/\">Redis EVAL</a>；<a href=\"https://redis.io/docs/latest/develop/clients/patterns/distributed-locks/\">分布式锁安全边界</a>。带着本课实验的输出阅读；有任何不清楚的步骤，可以直接把命令和结果发给学习助手继续追问。</p><p>固定窗口计数会把被拒绝的请求也计入当前窗口，但不会延长窗口寿命，这一点应写进预期。检查返回值时区分允许、拒绝和脚本执行失败，不要把网络异常当作普通拒绝静默吞掉。为了让演练可重复，使用新的课程键，避免上一次计数影响本次结果。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "释放租约锁前，必须原子检查哪项条件？",
+      "options": [
+        "剩余寿命充足",
+        "持有令牌相同",
+        "等待队列为空"
+      ],
+      "answer": 1,
+      "explanation": "原子比较token再删除可避免误删后来的持有者；但仍不能阻止租约过期的旧持有者继续写下游。"
+    },
+    "exercise": {
+      "task": "验证限流和安全释放，并模拟旧持有者恢复。",
+      "steps": [
+        "十秒内调用脚本四次，记录返回值。",
+        "SET course:lock tokenB NX PX 30000。",
+        "EVAL 比较GET值是否等于ARGV[1]，相同才DEL，传入tokenA。",
+        "GET course:lock，确认仍是tokenB；再用tokenB释放。"
+      ],
+      "expected": "限流返回1、1、1、0；错误令牌不能删除锁，正确令牌才能删除。",
+      "solution": "释放脚本：if redis.call(\"GET\",KEYS[1])==ARGV[1] then return redis.call(\"DEL\",KEYS[1]) else return 0 end。外部写正确性仍需数据库约束。"
+    },
+    "sources": [
+      {
+        "title": "Redis EVAL",
+        "url": "https://redis.io/docs/latest/commands/eval/"
+      },
+      {
+        "title": "分布式锁安全边界",
+        "url": "https://redis.io/docs/latest/develop/clients/patterns/distributed-locks/"
+      }
+    ],
+    "lab": "独立 Redis CLI"
+  },
+  {
+    "id": 29,
+    "slug": "redis-operations",
+    "title": "Redis 持久化、复制与集群运维",
+    "phase": "05 · Redis 与缓存",
+    "minutes": 30,
+    "prerequisites": [
+      "第28课：原子与锁"
+    ],
+    "goal": "区分可恢复、高可用和可扩展，并写出一次可验证的恢复计划。",
+    "bridge": "前端缓存通常清空即可；后端Redis若承载会话或队列，重启后的损失会影响用户业务。",
+    "sections": [
+      {
+        "title": "三个能力回答不同问题",
+        "html": "<p>持久化回答进程重启后能恢复多少数据；复制与故障切换回答一个节点故障时谁提供服务；分片回答单机容量或吞吐不足时如何分摊。RDB 保存时间点快照，AOF 记录写入并按策略刷盘；它们都有资源开销和恢复时间。复制通常异步，主节点确认给客户端的最近写入仍可能在故障切换后丢失。不能把“有副本”直接翻译为“绝不丢数据”，也不能把 AOF 文件存在翻译为“备份一定可用”。</p>"
+      },
+      {
+        "title": "先读运行状态再调参数",
+        "html": "<p>下面都是观察命令。INFO memory 观察使用量和淘汰相关背景，INFO persistence 观察持久化运行状态，INFO replication 观察角色与复制进展，SLOWLOG 看服务器命令执行慢的记录。客户端超时还可能来自网络或排队，不能只根据 SLOWLOG 没有慢命令就认定服务正常。容量预算需要给复制缓冲、持久化 fork 的写时复制等留空间。开发 Compose 单节点只是功能演示，不是高可用拓扑。</p><pre><code>docker compose exec redis redis-cli INFO memory\ndocker compose exec redis redis-cli INFO persistence\ndocker compose exec redis redis-cli INFO replication\ndocker compose exec redis redis-cli SLOWLOG GET 5\ndocker compose exec redis redis-cli CONFIG GET maxmemory-policy</code></pre>"
+      },
+      {
+        "title": "Sentinel 与 Cluster 的边界",
+        "html": "<p>Sentinel 侧重监测主从和故障转移；Cluster 把键分到哈希槽，组合分片与各分片的复制故障转移。客户端要支持拓扑变化与重定向，多key操作需要考虑槽位置。Hash tag 可以让相关键同槽，但滥用会产生热点。系统上云后通常使用托管产品提供部署与备份能力，应用仍负责超时、重连、幂等和容量规划。运维设计要分别回答少量数据丢失容忍度RPO和恢复时间目标RTO，而非只写“使用集群”。</p>"
+      },
+      {
+        "title": "恢复练习才验证持久化",
+        "html": "<p>本课程不要求清空已有卷来测试。创建专用隔离实例和命名学习数据，记录持久化配置，在持续写入期间正常停止再恢复，比较预期条数；另做异常停止实验，记录可能损失窗口。备份必须尝试在新的实例恢复，并检查业务可读，而不是只比较文件大小。缓存型数据可以选择重建，但重建时仍需要第27课的回源保护；会话等非缓存数据则必须明确用户影响。演练结论包括配置、命令、数据差异和耗时。</p><p>一手阅读：<a href=\"https://redis.io/docs/latest/operate/oss_and_stack/management/persistence/\">Redis 持久化</a>；<a href=\"https://redis.io/docs/latest/operate/oss_and_stack/management/replication/\">Redis 复制</a>；<a href=\"https://redis.io/docs/latest/operate/oss_and_stack/reference/cluster-spec/\">Redis Cluster 规范</a>。带着本课实验的输出阅读；有任何不清楚的步骤，可以直接把命令和结果发给学习助手继续追问。</p><p>不要为了排查性能在生产直接运行长时间MONITOR；逐条追踪命令本身有额外开销，还可能暴露业务内容。先使用已有指标、慢日志和有限采样。容量告警也需要趋势：内存尚未满但持续增长，可能比一次短暂高峰更需要定位键增长来源。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "主节点收到写入并回复成功，可以直接证明什么？",
+      "options": [
+        "副本全部刷盘",
+        "故障切换无损",
+        "主节点已确认"
+      ],
+      "answer": 2,
+      "explanation": "异步复制可能尚未传播，持久化还取决于刷盘策略；客户端成功只证明当前协议配置下完成了确认。"
+    },
+    "exercise": {
+      "task": "为任务详情缓存和登录会话分别制定 Redis 恢复策略。",
+      "steps": [
+        "运行五条观察命令，保存角色、持久化状态和淘汰策略。",
+        "写下两类数据的RPO/RTO以及可否从数据库重建。",
+        "只为隔离实例设计“写入—停机—新实例恢复—读回”的步骤。",
+        "写出恢复后缓存回源洪峰如何限流。"
+      ],
+      "expected": "能区分主从切换与备份恢复；策略包含业务损失和容量约束。",
+      "solution": "详情缓存可重建且允许短时未命中；会话丢失可能迫使重登。不同风险需要不同恢复目标，复制与持久化不能相互替代。"
+    },
+    "sources": [
+      {
+        "title": "Redis 持久化",
+        "url": "https://redis.io/docs/latest/operate/oss_and_stack/management/persistence/"
+      },
+      {
+        "title": "Redis 复制",
+        "url": "https://redis.io/docs/latest/operate/oss_and_stack/management/replication/"
+      },
+      {
+        "title": "Redis Cluster 规范",
+        "url": "https://redis.io/docs/latest/operate/oss_and_stack/reference/cluster-spec/"
+      }
+    ],
+    "lab": "Redis CLI 只读观测 + 隔离恢复设计"
+  },
+  {
+    "id": 30,
+    "slug": "kafka-partitions-order",
+    "title": "Kafka：日志、分区、key 与顺序",
+    "phase": "06 · Kafka 与事件一致性",
+    "minutes": 30,
+    "prerequisites": [
+      "第21课：真实依赖测试边界",
+      "SETUP.md：按需启动Kafka"
+    ],
+    "goal": "创建双分区主题，观察同key顺序和不同消费组的独立进度。",
+    "bridge": "前端事件总线通常随页面消失；Kafka把事件写成持久日志，让订阅者按自己的进度重放。",
+    "sections": [
+      {
+        "title": "消息不是消费后立刻消失",
+        "html": "<p>topic 是逻辑事件集合，partition 是有序追加日志，offset 是该分区的位置。消费者读取后日志仍按保留策略存在，其他消费组可以独立读取。顺序边界是分区，不是整个topic。记录key通常决定路由，同一业务实体使用相同key有利于保持该实体的事件顺序；多个生产者并发仍需设计业务版本和冲突规则。Kafka 4主线使用KRaft管理元数据，本课程不再把ZooKeeper当作Kafka启动前置。</p>"
+      },
+      {
+        "title": "运行双分区实验",
+        "html": "<p>根Compose启动kafka后，官方镜像中的工具位于 /opt/kafka/bin。以下创建课程独立主题，副本数1仅为单节点本地演示。创建完成后生产者进入交互输入；输入两行后用Ctrl-C退出，再执行消费者命令。相同key的两条事件应出现在同一分区且offset递增；打印分区与offset才是在验证顺序，不能只看时间戳。</p><pre><code>docker compose up -d kafka\ndocker compose exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --create --if-not-exists --topic course.tasks --partitions 2 --replication-factor 1\ndocker compose exec kafka /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server localhost:9092 --topic course.tasks --property parse.key=true --property key.separator=: \n# 交互输入：\n42:created\n42:completed\n# 退出生产者后：\ndocker compose exec kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic course.tasks --from-beginning --max-messages 2 --property print.key=true --property print.partition=true --property print.offset=true</code></pre>"
+      },
+      {
+        "title": "增加分区不是透明的顺序升级",
+        "html": "<p>对默认按key哈希分区的逻辑，增加分区数可能改变key映射；历史记录留在旧分区，新记录进入新分区，不能再依赖它们位于同一条日志。扩容前要设计迁移、停写窗口或消费者版本约束。一个消费组中某分区通常只由一个消费者实例负责，因此实例多于分区时会有闲置。热点key也可能让一个分区承担大部分流量，单纯加机器不能自动解决。分区数是并行度、顺序与运维成本之间的选择。</p>"
+      },
+      {
+        "title": "给事件定义含义",
+        "html": "<p>“用户要求完成任务”是命令，“任务已经完成”是事实事件；把两者混用会让消费者无法判断是否需要再次执行业务。事件要有eventId、实体ID、发生时间、类型和schema版本；只发送消费者真正需要的数据。保留期决定故障后最多能重放多久，压缩主题适合保留key最新状态，但不是所有业务事件审计的等价替代。本课只要求认识日志边界，后面会把投递、处理和数据库副作用分开证明。</p><p>一手阅读：<a href=\"https://kafka.apache.org/41/getting-started/quickstart/\">Kafka Quick Start</a>；<a href=\"https://kafka.apache.org/41/design/protocol/\">Kafka 分区与协议</a>。带着本课实验的输出阅读；有任何不清楚的步骤，可以直接把命令和结果发给学习助手继续追问。</p><p>分区中的offset是记录位置，可能不连续地出现在你看到的业务消息中，例如事务控制记录和日志清理会影响可见性。不能把两个业务消息offset之差简单当成准确待处理业务条数。事件保留策略与消费组进度独立，长时间离线消费者可能失去可重放的历史。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "Kafka 原生日志顺序直接保证的范围是什么？",
+      "options": [
+        "单个分区内部",
+        "整个集群内部",
+        "所有消费组间"
+      ],
+      "answer": 0,
+      "explanation": "offset是分区内的位置；不同分区没有天然全局顺序，消费速度也可不同。"
+    },
+    "exercise": {
+      "task": "向双分区主题发送两个任务的状态事件，并观察路由。",
+      "steps": [
+        "为本次练习创建一个新的双分区主题（例如 course.tasks.exercise1；已存在时换后缀），把生产者和消费者的 --topic 同步改成此主题，发送42:created、43:created、42:completed、43:completed。",
+        "将消费者改为 --max-messages 4，输出key、partition与offset；本次新主题应只有这4条记录。",
+        "按key整理输出，确认实体内顺序。",
+        "解释为何不能根据跨分区输出先后判断业务全局顺序。"
+      ],
+      "expected": "同一key路由相同且offset递增；不同key可能同分区也可能不同，不能预设恰好均分。",
+      "solution": "分区数量固定且默认key路由下同key同分区；并行消费的跨分区显示顺序不构成全局事件顺序。"
+    },
+    "sources": [
+      {
+        "title": "Kafka Quick Start",
+        "url": "https://kafka.apache.org/41/getting-started/quickstart/"
+      },
+      {
+        "title": "Kafka 分区与协议",
+        "url": "https://kafka.apache.org/41/design/protocol/"
+      }
+    ],
+    "lab": "独立 Kafka CLI；使用根 compose.yaml 的 kafka 服务"
+  },
+  {
+    "id": 31,
+    "slug": "kafka-producer-durability",
+    "title": "Kafka 生产者：确认、重试与幂等",
+    "phase": "06 · Kafka 与事件一致性",
+    "minutes": 30,
+    "prerequisites": [
+      "第30课：分区日志"
+    ],
+    "goal": "解释 acks、ISR 与幂等生产者，并识别异步发送假成功。",
+    "bridge": "前端fetch调用返回Promise还不代表业务成功；Kafka send返回future同样需要等待或观察最终结果。",
+    "sections": [
+      {
+        "title": "成功有不同强度",
+        "html": "<p>acks=0 不等待broker确认；acks=1等待leader确认；acks=all等待当前同步副本集合所要求的确认。生产可靠性还依赖副本数和 min.insync.replicas 等broker/topic配置：只有一个副本时，all也不会凭空产生冗余。示例开发环境只有一个broker，不能用它证明生产故障切换安全。确认成功不等于消费者处理成功，发送、持久化、消费和外部副作用是不同阶段，应有不同的状态和指标。</p>"
+      },
+      {
+        "title": "显式写出意图再理解默认值",
+        "html": "<p>Kafka现代客户端一般已有较强默认配置，但教学与审计时仍应写出关键意图。开启幂等生产需要与acks、重试和在途请求限制兼容；由Spring Boot管理客户端依赖，避免自行混搭版本。delivery.timeout.ms 控制整体交付等待上限，request.timeout.ms 是单次请求等待，linger.ms 是批量等待，它们不是同一个计时器。超时意味着结果可能未知，不能自动理解为broker没有写入。</p><pre><code>spring:\n  kafka:\n    producer:\n      acks: all\n      properties:\n        enable.idempotence: true\n        delivery.timeout.ms: 30000\n        request.timeout.ms: 10000\n        linger.ms: 5\n# 教学配置片段；复制因子和min.insync.replicas在主题/集群端设置。</code></pre>"
+      },
+      {
+        "title": "幂等生产不等于业务只执行一次",
+        "html": "<p>生产者幂等性针对协议重试造成的重复追加；应用重启后重新构造同一业务事件并再次发送，仍可能产生两条有效记录。HTTP客户端重试、outbox重发和人工重放也需要稳定eventId和消费者幂等。Spring Kafka的KafkaTemplate.send返回异步结果，应通过future回调记录成功或失败并触发补偿，不能在调用下一行就写“已投递成功”。为了数据库事务中不等待远端，后续会引入outbox；它解决的是另一层问题。</p>"
+      },
+      {
+        "title": "观察真正的确认",
+        "html": "<p>独立CLI可以通过 --producer-property acks=all 和 --producer-property enable.idempotence=true 表达意图。演练中先发少量课程消息并消费核对，再在隔离环境中停止broker观察发送失败和超时。应记录尝试数、确认数、失败数以及eventId；“控制台没打印错误”不足以证明每条消息都成功。吞吐调优前先定可靠性需求，随后测批量、压缩和延迟；不能为了提高单次基准数字随意降到acks=0。</p><p>一手阅读：<a href=\"https://kafka.apache.org/41/configuration/producer-configs/\">Kafka Producer 配置</a>；<a href=\"https://docs.spring.io/spring-kafka/reference/kafka/transactions.html\">Spring Kafka 事务</a>。带着本课实验的输出阅读；有任何不清楚的步骤，可以直接把命令和结果发给学习助手继续追问。</p><p>应用发送回调也必须观测自身异常：回调写日志失败或更新本地状态失败，可能留下无人处理的发送结果。每个消息保留可关联的业务标识，在测试环境主动制造失败，核对成功数与失败数之和是否覆盖全部尝试；不要只统计发送方法被调用多少次。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "幂等生产者最直接解决哪类重复？",
+      "options": [
+        "业务重新提交",
+        "协议内部重试",
+        "人工事件重放"
+      ],
+      "answer": 1,
+      "explanation": "幂等生产者可识别同一生产会话中的协议重试；业务重复发送需要稳定事件标识与消费者去重。"
+    },
+    "exercise": {
+      "task": "审查一段“send后立即记录成功”的代码，写出正确状态表。",
+      "steps": [
+        "列出SEND_REQUESTED、ACKED、FAILED_OR_UNKNOWN三种发送状态。",
+        "为异步future的成功和失败回调分别指定状态迁移。",
+        "把一个eventId重复发送两次，说明为何消费者仍要防重。",
+        "说明本地单副本实验不能证明哪些生产能力。"
+      ],
+      "expected": "能区分本地排队、broker确认和业务处理；重复业务发送不被错误承诺为只投递一次。",
+      "solution": "future成功表示生产协议确认成功，失败可能存在结果未知窗口；保留eventId并通过outbox和消费幂等恢复。"
+    },
+    "sources": [
+      {
+        "title": "Kafka Producer 配置",
+        "url": "https://kafka.apache.org/41/configuration/producer-configs/"
+      },
+      {
+        "title": "Spring Kafka 事务",
+        "url": "https://docs.spring.io/spring-kafka/reference/kafka/transactions.html"
+      }
+    ],
+    "lab": "Kafka CLI + 异步发送状态设计；infra profile实现以项目README为准"
+  },
+  {
+    "id": 32,
+    "slug": "consumer-groups-offsets",
+    "title": "消费组、offset 与重平衡",
+    "phase": "06 · Kafka 与事件一致性",
+    "minutes": 30,
+    "prerequisites": [
+      "第30课：分区",
+      "第31课：投递确认"
+    ],
+    "goal": "用消费组观察进度，并分析处理时间、提交时机和重平衡的关系。",
+    "bridge": "前端分页游标表示下次从哪里开始；Kafka已提交offset也代表恢复时下一条位置，而不是业务处理的自动证明。",
+    "sections": [
+      {
+        "title": "区分三个位置",
+        "html": "<p>broker日志末端说明已经写到哪里；消费者当前position说明下一次将读取哪里；已提交offset说明故障恢复从哪里开始。拉取一批记录会推进读取位置，但这批记录的业务处理可能还没结束。lag通常反映日志末端与消费组提交位置的差距，不能仅凭lag为零证明外部数据库处理一定正确。消费组ID是持久身份：更换groupId相当于另一个订阅者，它不会自动继承旧组的处理进度。</p>"
+      },
+      {
+        "title": "用CLI看见消费组",
+        "html": "<p>在第30课主题上启动指定group的消费者，输入少量事件，然后查看group状态。控制台消费者用于观察机制，不代表已经具备数据库安全提交的业务消费者。--from-beginning只影响没有有效已提交位置时的起点策略，不会每次强制覆盖一个已有组的offset。重置offset属于运维操作，必须先停止相关消费者，在隔离主题使用 dry-run 查看范围后再执行。</p><pre><code>docker compose exec kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic course.tasks --group course-inspect --from-beginning\n# 另一个终端查看进度与lag：\ndocker compose exec kafka /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --describe --group course-inspect</code></pre>"
+      },
+      {
+        "title": "重平衡重新分配责任",
+        "html": "<p>实例启动、离开或失联等会触发分区责任变化。业务处理若长时间不返回到poll循环，可能超过max.poll.interval.ms，导致自己失去分区后仍在处理旧数据，提交时失败。减少max.poll.records、缩短批次处理、异步架构下有序管理完成位置，比简单把超时调成几小时更可控。不要把KafkaConsumer实例随意跨线程共享。offset提交到更后位置意味着前面的记录也被视为完成，某条失败时不能跳过后续完成状态随便提交。</p>"
+      },
+      {
+        "title": "Spring容器仍需要明确策略",
+        "html": "<p>Spring Kafka提供容器管理poll与提交，默认行为需要按当前配置和AckMode确认。业务代码通常让成功返回代表本次处理完成，失败抛出异常交给错误处理；吞掉异常会把失败伪装成成功。手动ack只提供控制点，不会自动把数据库提交和Kafka offset组成事务。优先完成第33课的幂等数据库写入，再选择合适提交模式。记录每次重平衡和处理时长，避免只盯总吞吐忽略重复处理与长尾延迟。</p><p>一手阅读：<a href=\"https://kafka.apache.org/41/configuration/consumer-configs/\">Kafka Consumer 配置</a>；<a href=\"https://docs.spring.io/spring-kafka/reference/kafka/receiving-messages/message-listener-container.html\">Spring Kafka 消息监听容器</a>。带着本课实验的输出阅读；有任何不清楚的步骤，可以直接把命令和结果发给学习助手继续追问。</p><p>重平衡测试应同时记录分区分配和消费者实例标识。一个组的消费者多于分区时，部分实例没有分区是正常现象；如果把它误判为故障反复重启，会造成更多重平衡。手动重置进度前先明确会重复执行哪些副作用，并确认幂等保留窗口仍覆盖重放范围。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "已提交offset=12，恢复时通常从哪条位置开始？",
+      "options": [
+        "恢复位置十一",
+        "恢复位置十三",
+        "恢复位置十二"
+      ],
+      "answer": 2,
+      "explanation": "提交值表示下一条要消费的位置，12代表此前位置已被视为处理完成。"
+    },
+    "exercise": {
+      "task": "观察同组消费者与新组消费者的区别。",
+      "steps": [
+        "用course-inspect组消费独立课程主题，稍候后描述group。",
+        "同组再启动第二实例，查看分区分配。",
+        "停止后以同group重启，观察已提交记录不会自动重放。",
+        "用新group加from-beginning读取，解释为何能重放保留期内记录。"
+      ],
+      "expected": "同组按分区分担工作；新组独立拥有进度；实际提交时刻会影响最后少量重放。",
+      "solution": "消费组是独立订阅身份，已提交offset用于恢复。观察到最后少量重复并非异常，下一课通过业务幂等保证结果。"
+    },
+    "sources": [
+      {
+        "title": "Kafka Consumer 配置",
+        "url": "https://kafka.apache.org/41/configuration/consumer-configs/"
+      },
+      {
+        "title": "Spring Kafka 消息监听容器",
+        "url": "https://docs.spring.io/spring-kafka/reference/kafka/receiving-messages/message-listener-container.html"
+      }
+    ],
+    "lab": "独立 Kafka CLI"
+  },
+  {
+    "id": 33,
+    "slug": "consumer-idempotency",
+    "title": "至少一次投递与消费幂等",
+    "phase": "06 · Kafka 与事件一致性",
+    "minutes": 30,
+    "prerequisites": [
+      "第32课：消费组进度",
+      "数据库事务与唯一约束"
+    ],
+    "goal": "为数据库副作用设计可重试且只生效一次的消费事务。",
+    "bridge": "按钮防重复点击只保护一个页面；后端必须面对网络重试、进程崩溃和消息重放带来的重复。",
+    "sections": [
+      {
+        "title": "把崩溃点画在两次提交之间",
+        "html": "<p>先提交offset再改数据库，进程在中间崩溃会漏处理；先改数据库再提交offset，中间崩溃会重复处理。把两个步骤换顺序无法消除窗口。常用做法是接受至少一次到达，通过业务幂等使重复到达不重复产生副作用。幂等不只是“重复调用返回成功”，而是相同业务请求再次执行，结果仍满足预期。一个累加计数器天然不幂等，按实体版本条件更新或按eventId唯一约束就能把重复识别出来。</p>"
+      },
+      {
+        "title": "去重记录与业务写入同一事务",
+        "html": "<p>以下是 PostgreSQL 设计片段，使用独立学习表，不直接修改当前项目迁移。去重键包含订阅者名称：两个不同用途消费者都应有机会处理同一事件。INSERT返回是否插入成功；只有新插入时执行业务更新。两者必须在同一个数据库事务中，若业务失败整个事务回滚。不能先向Redis写去重标记，再修改数据库；那会在失败后把尚未完成的业务永远跳过。</p><pre><code>CREATE TABLE course_consumed_event (\n  subscriber varchar(80) NOT NULL,\n  event_id uuid NOT NULL,\n  consumed_at timestamptz NOT NULL DEFAULT now(),\n  PRIMARY KEY (subscriber, event_id)\n);\n-- 与业务UPDATE放在同一事务；返回0行表示本订阅者已处理。\nINSERT INTO course_consumed_event(subscriber,event_id)\nVALUES (&#x27;task-counter&#x27;, &#x27;00000000-0000-0000-0000-000000000033&#x27;)\nON CONFLICT DO NOTHING\nRETURNING event_id;</code></pre>"
+      },
+      {
+        "title": "处理顺序和投递重复是两件事",
+        "html": "<p>同一eventId重复是去重问题；不同eventId但旧业务版本晚到是顺序问题。例如任务v4完成后收到v3进行中，eventId都不同，单纯去重仍会回退状态。要比较aggregateVersion，按规则拒绝过时更新，或在需要完整连续事件时检测版本缺口并等待补偿。Kafka事务在Kafka读写链路内有价值，但不会自动把普通数据库更新或发送邮件包括进来。邮件、支付等外部副作用需要对方支持幂等键或独立可恢复投递状态。</p>"
+      },
+      {
+        "title": "以崩溃测试证明结果",
+        "html": "<p>最小验证是同一个eventId消费两次，业务计数只增加一次；更强验证是在数据库提交后、offset提交前故意终止隔离消费者，重启后同一事件重放但计数不增加。再测业务抛错时去重行也回滚，使下一次仍可处理。去重表需要保留策略，不能比消息可能重放的窗口更短而不说明风险。记录重复计数用于了解系统行为，频繁重复可能是重平衡或失败重试，不应把它们全部当成无关噪声。</p><p>一手阅读：<a href=\"https://kafka.apache.org/41/design/design/\">Kafka 投递语义设计</a>；<a href=\"https://docs.spring.io/spring-kafka/reference/kafka/exactly-once.html\">Spring Kafka Exactly Once Semantics</a>。遇到不明白的输出、时序或取舍，请把你的推理发给学习助手继续追问。</p><p>数据库重复键也可能来自完全不同的业务冲突，因此要按约束名称和事件身份分类。只有“同一订阅者已经处理过这个事件”才能作为幂等成功；其他唯一约束冲突应保留失败并调查，否则消费者会把真实数据质量问题悄悄跳过。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "消费者修改数据库后尚未提交offset就崩溃，最需要什么？",
+      "options": [
+        "数据库业务防重",
+        "禁止消费者重启",
+        "先清理所有日志"
+      ],
+      "answer": 0,
+      "explanation": "记录会重放。通过数据库内的去重与业务写同事务，使重复事件不重复产生副作用。"
+    },
+    "exercise": {
+      "task": "设计三个故障点的预期数据库状态。",
+      "steps": [
+        "创建隔离去重表，重复执行同一INSERT，观察返回行数。",
+        "画出去重插入、业务更新、数据库提交、offset提交四步。",
+        "分别在业务更新失败、数据库提交后崩溃、正常结束三处标记状态。",
+        "额外加入旧版本但新eventId的记录，说明处理规则。"
+      ],
+      "expected": "重复INSERT第二次0行；事务失败可重试；提交后重放不重复更新；旧版本不能覆盖新状态。",
+      "solution": "去重行与业务写同事务；成功后允许提交offset。eventId处理重复，aggregateVersion处理乱序，两者职责不能混淆。"
+    },
+    "sources": [
+      {
+        "title": "Kafka 投递语义设计",
+        "url": "https://kafka.apache.org/41/design/design/"
+      },
+      {
+        "title": "Spring Kafka Exactly Once Semantics",
+        "url": "https://docs.spring.io/spring-kafka/reference/kafka/exactly-once.html"
+      }
+    ],
+    "lab": "独立 PostgreSQL 事务设计；task-service events-count 可作已实现路径观察"
+  },
+  {
+    "id": 34,
+    "slug": "transactional-outbox",
+    "title": "Outbox：数据库与消息的一致性",
+    "phase": "06 · Kafka 与事件一致性",
+    "minutes": 30,
+    "prerequisites": [
+      "第33课：消费幂等"
+    ],
+    "goal": "消除“任务已提交但事件没有保存”的双写窗口，并接受可恢复的重复投递。",
+    "bridge": "前端提交成功后还要另发埋点会漏事件；后端业务写与远程消息写也会有相同的两步失败问题。",
+    "sections": [
+      {
+        "title": "双写的两种坏结果",
+        "html": "<p>先保存任务再发Kafka，数据库提交后进程崩溃会缺事件；先发Kafka再保存任务，数据库回滚后下游可能收到一个从未成立的事实。普通@Transactional只覆盖指定事务管理器的资源，不能因为方法里同时出现数据库与Kafka就承诺跨系统原子性。Outbox把业务变化和待发送事件先写进同一个数据库事务，因此只会一起提交或一起回滚。它把“原子双写”改成“本地原子记录加可靠重试投递”。</p>"
+      },
+      {
+        "title": "事件在提交时就要稳定",
+        "html": "<p>Outbox至少包含稳定eventId、aggregateId、type、payload、创建时间与投递状态。eventId只生成一次，发布重试不能生成新ID；否则消费者无法辨认重复。业务事务里使用相同数据库连接保存任务与outbox，不在事务中长时间等待broker。下例展示结构意图；真实迁移与列名以task-service为准，不重复创建项目已有表。敏感信息不要无脑塞入payload，事件保留期通常比一次接口日志长。</p><pre><code>-- 教学结构：业务UPDATE与此INSERT同一数据库事务\nINSERT INTO course_outbox(\n  event_id, aggregate_id, event_type, payload, created_at\n) VALUES (\n  :eventId, :taskId, &#x27;TaskCompleted&#x27;, :payload, now()\n);\n-- 发布器：读取待发 -&gt; 等Kafka确认 -&gt; 标记已发\n-- 任一步失败保留eventId，记录重试次数与下一次尝试时间。</code></pre>"
+      },
+      {
+        "title": "发布器的重复窗口仍然存在",
+        "html": "<p>broker已确认，但发布器还没标记已发就崩溃，重启会再次发送；所以outbox通常提供至少一次投递，必须配合第33课幂等消费。多个发布器要协调领取工作，可设计短事务领取和租约，不要一直持有数据库行锁等远端网络。跳过锁定行的并行领取可能改变同实体消息顺序，需要结合分区key与实体版本约束。失败必须有退避、次数和告警；永远静默重试会把丢消息变成无人发现的永久积压。</p>"
+      },
+      {
+        "title": "轮询与 CDC 的选择",
+        "html": "<p>轮询实现容易理解，但查询与状态更新会增加数据库负担；CDC读取数据库变更日志，Debezium Outbox Router可按outbox结构路由事件，但引入连接器、日志保留与运维要求。两者都需要关注最老未发布事件年龄，而不仅仅是待发条数。清理已发记录前确认审计和重放需求。故障演练应让Kafka短暂不可用：业务与outbox仍一起落库，恢复后积压排空，消费者结果正确；不要把“HTTP返回200”当作全链路成功。</p><p>一手阅读：<a href=\"https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html\">Debezium Outbox Event Router</a>；<a href=\"https://docs.spring.io/spring-kafka/reference/kafka/transactions.html\">Spring Kafka 事务边界</a>。遇到不明白的输出、时序或取舍，请把你的推理发给学习助手继续追问。</p><p>待发消息的可恢复性还取决于数据库备份与清理策略。若后台清理把尚未确认的记录误删，可靠投递机制仍会失效。每次清理应限定已确认且超过保留期的数据，先在隔离数据集验证，并让清理数量与最老待发年龄都能被观察。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "Outbox 与幂等消费者结合后，最准确的承诺是什么？",
+      "options": [
+        "全链路绝无重复",
+        "可恢复重复投递",
+        "无需保留事件号"
+      ],
+      "answer": 1,
+      "explanation": "Outbox保存可靠发送意图；发送确认与标记仍有重复窗口，稳定eventId和消费者防重保证业务结果。"
+    },
+    "exercise": {
+      "task": "为task-service画一张包含故障恢复的outbox状态图。",
+      "steps": [
+        "阅读项目outbox代码与迁移，标出业务事务边界。",
+        "列出已保存未发送、已确认未标记、已标记三种状态。",
+        "写出每种状态重启时该做什么。",
+        "定义pending_count、oldest_pending_age和delivery_failure三个观测项。"
+      ],
+      "expected": "发送成功未标记场景会重发但eventId不变；失败积压可见且可恢复。",
+      "solution": "发送必须在确认成功后标记；重复到达由消费端数据库幂等兜底。CDC可替换轮询，但不会取消幂等与运维监控。"
+    },
+    "sources": [
+      {
+        "title": "Debezium Outbox Event Router",
+        "url": "https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html"
+      },
+      {
+        "title": "Spring Kafka 事务边界",
+        "url": "https://docs.spring.io/spring-kafka/reference/kafka/transactions.html"
+      }
+    ],
+    "lab": "examples/task-service 阅读与时序实验；完整故障注入属于进阶增量"
+  },
+  {
+    "id": 35,
+    "slug": "kafka-retries-dlt",
+    "title": "Kafka 重试、DLT 与毒消息",
+    "phase": "06 · Kafka 与事件一致性",
+    "minutes": 30,
+    "prerequisites": [
+      "第32课：offset",
+      "第33课：幂等消费"
+    ],
+    "goal": "让可恢复错误重试、永久坏消息可调查，并保持明确的顺序契约。",
+    "bridge": "前端错误边界隔离局部崩溃；消费者也不能让一条坏记录无限堵住全部事件，又悄悄把失败吞掉。",
+    "sections": [
+      {
+        "title": "先分类再决定重试",
+        "html": "<p>网络短暂不可达、外部限流等可能恢复；字段格式不对、违反不可变业务规则等通常不会靠等待自动修好。反序列化失败甚至发生在监听方法之前，需要相应反序列化与容器错误处理。限制重试次数与总时间，记录原因和原始位置。把所有异常都无穷重试，会让坏记录变成持续阻塞；把所有异常都忽略，会让业务永久缺失。DLT是死信主题，用于保留失败证据与后续处理，不是自动修复设施。</p>"
+      },
+      {
+        "title": "阻塞与非阻塞重试的取舍",
+        "html": "<p>阻塞重试可暂停当前分区进展，便于维持顺序，但会增加lag。非阻塞重试把消息转移到重试主题，主主题继续处理，吞吐更灵活，却可能让后续状态先被处理。Spring Kafka的重试主题机制有适用边界，不能默认和容器事务自由组合。若任务状态严格按版本推进，先定义乱序和缺口处理，再选择重试模式。不要为了消除lag数字，把本应停止的业务序列盲目发到DLT后继续。</p>"
+      },
+      {
+        "title": "一个错误处理器的意图",
+        "html": "<p>下面是教学配置片段，使用现有KafkaTemplate并需要在独立练习配置类中提供相关import。DLT一般应有足够分区以承接原始分区，生产环境应显式创建topic、ACL与保留策略；不要依赖自动建topic碰运气。DefaultErrorHandler配合recoverer在重试耗尽后投递失败记录；必须同时考虑DLT发布失败如何阻止错误地确认原记录。</p><pre><code>var recoverer = new DeadLetterPublishingRecoverer(kafkaTemplate);\n// 首次失败后再尝试2次，每次间隔1秒；总尝试3次。\nvar handler = new DefaultErrorHandler(\n    recoverer, new FixedBackOff(1000L, 2L));\nhandler.addNotRetryableExceptions(IllegalArgumentException.class);\n// 将handler接入监听容器工厂；具体接线见官方当前版本文档。</code></pre>"
+      },
+      {
+        "title": "重放是一项有审计的操作",
+        "html": "<p>DLT记录需要原topic、partition、offset、eventId、失败类型和时间，但异常文本也可能泄漏敏感数据，应控制访问。运维人员修复schema或代码后，按小批次重放，保留同eventId，并观察数据库幂等及错误率。重复失败时立即停止，不能无限在主主题与DLT之间循环。完成标准是坏消息可定位、正常消息按约定继续、告警触达且能复原影响范围。只看消费者进程还活着，不能证明它还在正确处理。</p><p>一手阅读：<a href=\"https://docs.spring.io/spring-kafka/reference/kafka/annotation-error-handling.html\">Spring Kafka 错误处理</a>；<a href=\"https://docs.spring.io/spring-kafka/reference/retrytopic.html\">非阻塞重试</a>。遇到不明白的输出、时序或取舍，请把你的推理发给学习助手继续追问。</p><p>死信主题也要有访问权限、保留期限和容量预算。若它填满或发布失败，原消息是否提交必须明确定义并测试。恢复人员应能根据事件标识找到业务状态；没有关联标识的错误文本，即便保存了很多，也难以判断哪些用户真正受到影响。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "非阻塞重试把失败消息转到其他主题，必须评估什么？",
+      "options": [
+        "记录永远不重复",
+        "所有分区会合并",
+        "实体事件会乱序"
+      ],
+      "answer": 2,
+      "explanation": "失败记录延后处理时，主主题后续事件可能先完成；需要业务版本、缺口策略或选择阻塞重试。"
+    },
+    "exercise": {
+      "task": "给四种失败写重试矩阵。",
+      "steps": [
+        "列出连接超时、临时限流、缺少必填字段、数据库唯一键冲突。",
+        "填写是否重试、最大次数、退避、是否DLT。",
+        "说明唯一键冲突在重复事件与真实业务冲突两种场景的区别。",
+        "制定DLT小批重放与停止条件。"
+      ],
+      "expected": "永久格式错误不会无限重试；重复事件可按幂等成功处理；业务冲突有单独判定。",
+      "solution": "重试策略基于错误语义；连接问题可退避，坏schema进入可调查流程，重复eventId不应当成毒消息。"
+    },
+    "sources": [
+      {
+        "title": "Spring Kafka 错误处理",
+        "url": "https://docs.spring.io/spring-kafka/reference/kafka/annotation-error-handling.html"
+      },
+      {
+        "title": "非阻塞重试",
+        "url": "https://docs.spring.io/spring-kafka/reference/retrytopic.html"
+      }
+    ],
+    "lab": "独立重试设计；配置片段是未并入项目的增量练习"
+  },
+  {
+    "id": 36,
+    "slug": "event-schema-evolution",
+    "title": "事件 schema 演进与契约测试",
+    "phase": "06 · Kafka 与事件一致性",
+    "minutes": 30,
+    "prerequisites": [
+      "第30课：事件",
+      "第35课：错误处理"
+    ],
+    "goal": "设计旧消费者仍能理解的新事件，并保存可运行的契约样本。",
+    "bridge": "前端API升级要兼容旧客户端；Kafka还要兼容磁盘里几周前留下的旧事件和晚升级的消费者。",
+    "sections": [
+      {
+        "title": "事件会活得比一次部署更久",
+        "html": "<p>发布者和消费者通常无法同时升级，历史日志也不会随着代码更新自动迁移。因此一个事件契约至少定义字段含义、类型、必填性、默认值、枚举扩展规则和版本策略。数据库实体对象不是稳定事件契约：重命名表字段不应该意外改变对外消息。使用专门事件DTO或schema，并保持eventId与实体ID职责不同。发生时间用明确时区的格式，金额用最小货币单位或明确十进制规则，避免JavaScript数字范围与Java long不一致。</p>"
+      },
+      {
+        "title": "添加字段也不是自动安全",
+        "html": "<p>新增可选字段，且旧消费者忽略未知字段时，常常能兼容；新增必填字段则使旧历史记录无法解析。字段改名、类型变化、含义变化通常破坏兼容。枚举新增值也可能打破旧客户端的穷尽switch。若用JSON，应显式约定未知字段与未知枚举处理；Boot4采用Jackson3，不能想当然复制旧com.fasterxml相关数据绑定import。Avro、Protobuf或JSON Schema与schema registry可以帮助自动检查，但仍不能判断“金额从元变成分”的业务含义变化。</p>"
+      },
+      {
+        "title": "为演进保存具体样本",
+        "html": "<p>下面两份原创样本表达同一个事实。v2新增可选actorDisplayName；消费的关键字段是eventId、taskId、type和aggregateVersion。把两份JSON作为契约fixtures，分别喂给新消费者测试；再用旧消费者验证v2是否能被接受。若无法兼容，就建立新事件类型或明确迁移期，不要让version字段只是装饰。</p><pre><code>// v1 fixture（真正保存为JSON时去掉注释）\n{&quot;eventId&quot;:&quot;e-36&quot;,&quot;taskId&quot;:&quot;42&quot;,&quot;type&quot;:&quot;TaskCompleted&quot;,\n &quot;schemaVersion&quot;:1,&quot;aggregateVersion&quot;:3}\n// v2 fixture\n{&quot;eventId&quot;:&quot;e-36&quot;,&quot;taskId&quot;:&quot;42&quot;,&quot;type&quot;:&quot;TaskCompleted&quot;,\n &quot;schemaVersion&quot;:2,&quot;aggregateVersion&quot;:3,&quot;actorDisplayName&quot;:&quot;Lin&quot;}</code></pre>"
+      },
+      {
+        "title": "契约验证与业务验证配合",
+        "html": "<p>契约测试检查序列化、字段约束与兼容性；业务测试检查旧版本事件不会覆盖新状态；端到端测试检查真实broker上的序列化器与配置。三者互补，单独一个不够。契约变更应记录生产者版本、受影响消费者、回滚方式与历史重放是否支持。不要在生产者和消费者测试中共享同一份错误实现，然后以“双方都通过”证明契约正确；保留独立预期fixture更容易发现无意变化。毕业项目将要求至少一次兼容字段演进和旧样本回放。</p><p>一手阅读：<a href=\"https://spec.openapis.org/oas/v3.1.1.html\">OpenAPI Schema 与JSON Schema语义</a>；<a href=\"https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html\">Debezium Outbox 消息结构</a>。遇到不明白的输出、时序或取舍，请把你的推理发给学习助手继续追问。</p><p>兼容测试还要覆盖字段值边界：空字符串与缺失字段不是同一回事，零与未知金额也不是同一回事。为标识符、日期和枚举各保存一个边界样本，可以避免默认值悄悄改变业务含义。契约文件应与代码一起审查，变更说明要让消费者维护者看得懂。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "最适合作为兼容演进起点的是哪种变更？",
+      "options": [
+        "新增可选字段",
+        "变更金额单位",
+        "删除必填字段"
+      ],
+      "answer": 0,
+      "explanation": "新增可选字段仍需验证旧消费者容忍未知字段；更改含义或删除必填字段通常破坏契约。"
+    },
+    "exercise": {
+      "task": "为TaskCompleted写一组新旧契约测试用例。",
+      "steps": [
+        "保存v1与v2两份合法JSON样本。",
+        "设计缺少可选字段、未知字段、未知枚举、缺少eventId四个输入。",
+        "为每种输入写接受或拒绝，以及错误证据。",
+        "说明schemaVersion与aggregateVersion为什么不能合并。"
+      ],
+      "expected": "兼容样本可读；缺少eventId不能悄悄生成新ID；业务版本仍独立用于防乱序。",
+      "solution": "schemaVersion描述消息结构；aggregateVersion描述实体业务进展。缺失身份应进入明确失败流程，而不是每次重试换新ID。"
+    },
+    "sources": [
+      {
+        "title": "OpenAPI Schema 与JSON Schema语义",
+        "url": "https://spec.openapis.org/oas/v3.1.1.html"
+      },
+      {
+        "title": "Debezium Outbox 消息结构",
+        "url": "https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html"
+      }
+    ],
+    "lab": "独立契约fixtures设计；task-service为后续实现载体"
+  },
+  {
+    "id": 37,
+    "slug": "observability-actuator",
+    "title": "Actuator：指标、日志与 trace",
+    "phase": "07 · 可靠性与运行时",
+    "minutes": 30,
+    "prerequisites": [
+      "基础HTTP与安全",
+      "第34课：outbox"
+    ],
+    "goal": "从一次慢请求出发，用三类证据定位发生在哪一层。",
+    "bridge": "前端DevTools看一条请求；后端需要把HTTP、数据库、缓存、Kafka之间的执行关系拼起来。",
+    "sections": [
+      {
+        "title": "三种证据各自回答问题",
+        "html": "<p>指标适合回答总体发生了多少、多久、是否偏离目标；日志记录具体事件和上下文；trace把一次操作跨多个服务的调用串起来。只堆日志会让容量与检索成本失控，只看平均值会掩盖少量极慢请求。Spring Boot Actuator提供管理能力，Micrometer Observation统一很多观测入口。没有接入追踪导出器与后端时，添加Actuator不等于已经获得完整分布式trace。对课堂环境先看健康与现有指标，再逐步连接采集系统。</p>"
+      },
+      {
+        "title": "暴露端点也是安全设计",
+        "html": "<p>管理端点要限制暴露和访问范围。健康端点可供探针使用，但配置、堆转储和环境等信息不能随意公开。下面是教学配置：是否允许匿名访问还由Spring Security配置决定。使用真实路由模板作为指标标签，例如/api/tasks/{id}，不要使用每个任务的实际ID，否则时间序列数快速增长。用户ID、eventId和traceId放日志或trace上下文，不放无限取值的指标标签。</p><pre><code>management:\n  endpoints:\n    web:\n      exposure:\n        include: health,info,metrics\n  endpoint:\n    health:\n      show-details: when_authorized\n# 开发环境观察已启用端点：\n# curl -i http://localhost:8080/actuator/health\n# 非公开端点需按项目README提供认证。</code></pre>"
+      },
+      {
+        "title": "为业务补上最少观测点",
+        "html": "<p>自动HTTP与JVM指标看得到服务外壳，还需要业务观测：任务创建成功数、版本冲突数、outbox最老待发年龄、消费重复数。日志至少区分info事件与error失败，保留异常堆栈而不是只打印“失败了”；删除请求正文中的密码、令牌和不必要个人数据。通过MDC或框架追踪上下文把同一次操作关联起来；切线程和消息边界时需要传播上下文，不会因为字段名叫traceId就自动联通。</p>"
+      },
+      {
+        "title": "用证据缩小范围",
+        "html": "<p>假设接口p95升高：先看错误率与吞吐是否同时变化，再查数据库连接等待、SQL耗时、Redis延迟及Kafka发布积压；随后按慢trace定位跨度，再用对应日志解释原因。每个猜想应给出可反驳证据，例如“CPU低而连接等待高”更像下游或池饱和而非算力不足。监控必须能区分依赖不可用与应用自身死锁，这也关系到第46课探针设计。最后保留一份真实请求、时间窗口、指标与原因链，而非漂亮却无法行动的看板。</p><p>一手阅读：<a href=\"https://docs.spring.io/spring-boot/reference/actuator/observability.html\">Spring Boot 可观测性</a>；<a href=\"https://docs.spring.io/spring-boot/reference/actuator/metrics.html\">Spring Boot 指标</a>。遇到不明白的输出、时序或取舍，请把你的推理发给学习助手继续追问。</p><p>日志量也有预算。对高频成功请求采用合适采样，错误日志防止同一异常在每一层重复打印。请求标识应在入口产生或严格验证来源，避免用户输入任意换行破坏结构化日志。排查结束后保留低成本常驻指标，清理临时高噪声诊断。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "哪一项更适合成为HTTP指标标签？",
+      "options": [
+        "完整用户令牌",
+        "固定路由模板",
+        "随机请求标识"
+      ],
+      "answer": 1,
+      "explanation": "固定路由模板具有有界基数。令牌敏感，随机ID使时间序列数量失控。"
+    },
+    "exercise": {
+      "task": "为一次创建任务请求写观测证据清单。",
+      "steps": [
+        "启动task-service，检查health实际返回。",
+        "按README认证查看已配置的其他管理端点，不假定全部公开。",
+        "选三项指标、两条结构化日志字段与一个trace关联字段。",
+        "构造一次版本冲突，说明它应如何被观察且避免记录敏感凭据。"
+      ],
+      "expected": "能把成功率、延迟、业务冲突与依赖问题区分开；标签维度有限。",
+      "solution": "使用method、route、status等有限维度；eventId/traceId进入日志与追踪。未配置exporter时明确分布式trace尚未验证。"
+    },
+    "sources": [
+      {
+        "title": "Spring Boot 可观测性",
+        "url": "https://docs.spring.io/spring-boot/reference/actuator/observability.html"
+      },
+      {
+        "title": "Spring Boot 指标",
+        "url": "https://docs.spring.io/spring-boot/reference/actuator/metrics.html"
+      }
+    ],
+    "lab": "examples/task-service + 管理端点；追踪后端为后续增量"
+  },
+  {
+    "id": 38,
+    "slug": "slo-load-jvm",
+    "title": "SLO、压测与 JVM 诊断",
+    "phase": "07 · 可靠性与运行时",
+    "minutes": 30,
+    "prerequisites": [
+      "第37课：可观测性"
+    ],
+    "goal": "制定可测服务目标，并用压测和JVM证据定位瓶颈。",
+    "bridge": "前端性能预算约束用户等待；后端SLO同样从用户体验出发，不是把CPU使用率本身当目标。",
+    "sections": [
+      {
+        "title": "先定义测量口径",
+        "html": "<p>SLI是测量指标，例如有效任务查询中在300ms内成功的比例；SLO是目标，例如滚动七天达到99.5%。这是教学目标，真实数值要根据业务与成本决定。明确分母是否包括客户端取消、鉴权失败与计划停机，否则各看板无法比较。错误预算是允许不达标的部分，用来约束发布与可靠性投入。p95不是95%的请求都刚好这个耗时，而是分位边界；平均值低不能说明长尾用户体验好。</p>"
+      },
+      {
+        "title": "负载模型决定结论适用范围",
+        "html": "<p>压测需写出数据规模、并发、请求速率、读写比例、缓存冷热、运行时间、机器规格与版本。先预热JIT，再测稳定段，最后增加负载找拐点；不要只测试所有请求都命中同一热key的快乐路径。闭环用户模型会因系统变慢而自动减少新请求，可能掩盖过载，恒定到达率模型有助于观察积压。每次只改变一项关键变量，才能把收益归因到修改。未安装压测工具时也应先写完整实验计划。</p>"
+      },
+      {
+        "title": "使用 JDK 自带诊断工具",
+        "html": "<p>在开发进程上运行jcmd -l寻找PID；命令需要与目标JVM的权限和环境相匹配。JFR记录低开销运行事件，线程栈帮助定位阻塞与竞争。堆转储可能暂停进程并包含敏感业务数据，不作为第一步随手操作。下面是本地诊断命令，先确认PID指向课堂进程。</p><pre><code>jcmd -l\n# 将12345换成task-service对应PID，记录30秒JFR：\njcmd 12345 JFR.start name=course settings=profile duration=30s filename=course-load.jfr\njcmd 12345 Thread.print\njcmd 12345 GC.heap_info\n# 记录文件后用Java Mission Control等工具分析热点与等待。</code></pre>"
+      },
+      {
+        "title": "把排队看成信号",
+        "html": "<p>并发数近似等于吞吐乘平均在系统内停留时间，只在适用的稳定条件下作估算：100 QPS、平均0.2秒约意味着20个并发在途请求。如果连接池只有10个且每次请求长时间占用连接，线程再多也不会消除排队。CPU高看计算热点，CPU低且延迟高看锁、连接等待与远端调用。诊断输出应包含假设、证据、单项修改和复测结果；“换更大机器”可以暂时扩容，但不能替代对瓶颈与容量上限的认识。</p><p>一手阅读：<a href=\"https://grafana.com/docs/k6/latest/testing-guides/api-load-testing/\">k6 API 压测</a>；<a href=\"https://docs.oracle.com/en/java/javase/21/docs/specs/man/jcmd.html\">JDK21 jcmd</a>。遇到不明白的输出、时序或取舍，请把你的推理发给学习助手继续追问。</p><p>不要把本机短时基准直接外推为生产容量。容器限额、数据库网络距离、索引规模、并发写入和缓存冷启动都会改变结论。压测报告应明确哪些条件未覆盖，并给出下一轮验证计划；诚实的容量区间比一个没有条件的最高吞吐数字更能指导部署。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "平均延迟低但p99很高，最合理的下一步是什么？",
+      "options": [
+        "证明性能已合格",
+        "直接增加重试数",
+        "定位长尾请求源"
+      ],
+      "answer": 2,
+      "explanation": "少数极慢请求会伤害用户体验并扩大排队，应结合trace、连接等待和JVM事件定位。"
+    },
+    "exercise": {
+      "task": "为任务查询写可复现压测方案并做一次本地诊断。",
+      "steps": [
+        "记录Java版本、数据量、请求比例、缓存状态与资源限制。",
+        "选择正常流量和接近容量两档，写出停止条件。",
+        "若有压测工具运行短时负载；同时采集一次JFR。",
+        "把p95、错误率、吞吐、CPU和连接等待放在同一时间窗口比较。"
+      ],
+      "expected": "能解释测试边界；有实际采集才标记已验证，没有运行的档位明确待做。",
+      "solution": "先确定负载与SLO，再根据CPU/等待区分瓶颈；复测必须保持相同数据与负载条件，不能只比较两次孤立QPS。"
+    },
+    "sources": [
+      {
+        "title": "k6 API 压测",
+        "url": "https://grafana.com/docs/k6/latest/testing-guides/api-load-testing/"
+      },
+      {
+        "title": "JDK21 jcmd",
+        "url": "https://docs.oracle.com/en/java/javase/21/docs/specs/man/jcmd.html"
+      }
+    ],
+    "lab": "examples/task-service + JDK21 jcmd；压测脚本为增量练习"
+  },
+  {
+    "id": 39,
+    "slug": "timeouts-retries-circuitbreaker",
+    "title": "超时、退避、熔断与隔离",
+    "phase": "07 · 可靠性与运行时",
+    "minutes": 30,
+    "prerequisites": [
+      "第38课：负载与排队"
+    ],
+    "goal": "为依赖调用分配时间与重试预算，避免局部故障变成全局拥塞。",
+    "bridge": "前端AbortController结束等待不保证服务器已停止执行；后端超时同样需要面对结果未知与副作用。",
+    "sections": [
+      {
+        "title": "从整个请求的截止时间倒推",
+        "html": "<p>连接超时限制建立连接，响应或读取超时限制等待数据，总截止时间限制整个用户操作。一个接口预算1秒，不能给三个串行依赖各1秒并期待仍然1秒内返回。重试、退避和排队都占总预算。超时后对方可能已经提交订单或扣费，所以写操作重试必须带稳定幂等键并支持结果查询。取消客户端future未必能取消远程副作用，也未必释放底层任务占用的资源。</p>"
+      },
+      {
+        "title": "重试有乘法效应",
+        "html": "<p>调用链三层各最多尝试三次，最坏可能放大到27次末端调用；故障时这会进一步挤压下游。优先在知道业务语义的一层重试，仅针对可恢复错误，设置最大尝试与总时间，并使用指数退避加随机抖动。常规参数校验失败不重试，限流应尊重服务器可用的重试提示。下例是jshell预算演算，展示等待与执行时间必须一起计算；真实HTTP客户端还要正确配置连接池和底层超时。</p><pre><code>int attempts = 3;\nint perAttemptMs = 200;\nint firstBackoffMs = 50;\nint secondBackoffMs = 100;\nint worstMs = attempts * perAttemptMs + firstBackoffMs + secondBackoffMs;\nSystem.out.println(worstMs); // 750ms，不含排队及其他业务逻辑\nSystem.out.println(Math.pow(3, 3)); // 三层嵌套重试最多27次末端尝试</code></pre>"
+      },
+      {
+        "title": "熔断与隔离分别控制什么",
+        "html": "<p>熔断器根据一段窗口内的失败或慢调用表现决定是否暂时快速拒绝，并在半开状态少量探测恢复；它通常不自动限制并发，也不自己取消超时请求。Bulkhead隔离通过并发许可或有界线程池控制某个依赖最多占用多少资源，避免拖死所有请求。限流控制单位时间流量，三者不能混为一个开关。降级结果必须表达语义：无法查到最新任务状态时不能返回假成功，只能明确陈旧或暂不可用。</p>"
+      },
+      {
+        "title": "组合顺序需要实验",
+        "html": "<p>重试包在熔断器外或内，会改变熔断器统计的是每次尝试还是最终调用；是否把限流拒绝计为失败，也会改变行为。不要堆叠注解后不检查调用链。用隔离的假依赖依次返回超时、503、成功，观察尝试数、耗时、熔断状态与并发数，确认总预算没有被突破。恢复时也应缓慢放量，避免所有实例同时探测导致二次冲击。最后保存明确的依赖失败契约，而不仅是几段默认配置。</p><p>一手阅读：<a href=\"https://resilience4j.readme.io/docs/circuitbreaker\">Resilience4j CircuitBreaker</a>；<a href=\"https://resilience4j.readme.io/docs/retry\">Resilience4j Retry</a>。遇到不明白的输出、时序或取舍，请把你的推理发给学习助手继续追问。</p><p>依赖恢复后还要观察积压释放过程。大量排队任务同时恢复可能再次打满下游，因此队列长度、超时任务清理和恢复放量同样属于设计。重试日志中记录尝试次数与最终结果，避免只看到最后成功而忽略为它消耗了过多资源。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "熔断器之外，为保护连接池还应直接限制什么？",
+      "options": [
+        "下游调用并发",
+        "日志文件名称",
+        "消息主题数量"
+      ],
+      "answer": 0,
+      "explanation": "熔断根据窗口状态拒绝调用；并发隔离限制正在消耗资源的调用数，两者作用不同。"
+    },
+    "exercise": {
+      "task": "为一个1秒预算的聚合API设计失败策略。",
+      "steps": [
+        "列出两个依赖的连接、请求、重试、退避预算。",
+        "只允许一层重试，写出允许重试的状态。",
+        "设置每个依赖的并发上限与队列上限。",
+        "模拟依赖提交成功但响应超时，说明用什么查询或幂等机制恢复。"
+      ],
+      "expected": "各段最坏预算加总不超过总目标；写入结果未知有恢复路径。",
+      "solution": "读请求可有限重试；有副作用请求需要幂等键。熔断、超时、隔离分别验证，不能把熔断当并发控制。"
+    },
+    "sources": [
+      {
+        "title": "Resilience4j CircuitBreaker",
+        "url": "https://resilience4j.readme.io/docs/circuitbreaker"
+      },
+      {
+        "title": "Resilience4j Retry",
+        "url": "https://resilience4j.readme.io/docs/retry"
+      }
+    ],
+    "lab": "独立 jshell + 依赖故障策略设计"
+  },
+  {
+    "id": 40,
+    "slug": "virtual-threads-context",
+    "title": "Java 虚拟线程与异步上下文",
+    "phase": "07 · 可靠性与运行时",
+    "minutes": 30,
+    "prerequisites": [
+      "第38课：JVM诊断",
+      "第39课：并发预算"
+    ],
+    "goal": "运行虚拟线程，并说明它为什么不能扩大数据库容量。",
+    "bridge": "你熟悉async/await让I/O等待不占满执行线程；虚拟线程让Java用顺序代码表达大量等待，但仍要控制资源。",
+    "sections": [
+      {
+        "title": "便宜的等待不是更快的计算",
+        "html": "<p>Java21的虚拟线程适合大量阻塞I/O任务，使等待不必总占用同等数量的操作系统线程。CPU密集计算仍受核心数量约束；数据库连接、下游QPS、内存和文件句柄也不会因此变多。每个请求可以拥有虚拟线程，但不能为每个请求创建无限数据库连接。通常不把虚拟线程放进固定大小的虚拟线程池复用；需要限制外部资源时使用连接池、信号量或业务队列。应先测阻塞位置，再判断是否带来收益。</p>"
+      },
+      {
+        "title": "用 Java21 直接运行",
+        "html": "<p>在jshell中运行这段完整片段，会创建独立虚拟线程执行任务，Future.get等待结果并传播失败；try-with-resources关闭executor并等待任务结束。示例延迟模拟I/O等待，只证明调度与等待语义，不是性能基准。不要在业务中为了假装异步而立即submit后get再添加不必要切换，真实收益来自多个等待任务可并发服务。</p><pre><code>import java.util.concurrent.*;\ntry (var executor = Executors.newVirtualThreadPerTaskExecutor()) {\n    var result = executor.submit(() -&gt; {\n        Thread.sleep(100); // 模拟等待；真实代码是受控的I/O\n        return &quot;virtual=&quot; + Thread.currentThread().isVirtual();\n    });\n    System.out.println(result.get());\n}\n// Boot配置开关：spring.threads.virtual.enabled=true</code></pre>"
+      },
+      {
+        "title": "版本与线程绑定状态的陷阱",
+        "html": "<p>Java21中某些synchronized内的阻塞和native调用会使虚拟线程固定在载体线程上，影响扩展性；可通过JFR等证据定位，不应把后续JDK改进当成Java21已有行为。ThreadLocal在虚拟线程上仍可使用，但每线程缓存巨大对象会放大内存。Spring事务通常与当前线程绑定，跨到@Async方法不会自动继承原事务；代理自调用还可能导致@Async根本没有生效。任务失败必须被future或异常处理器观察到。</p>"
+      },
+      {
+        "title": "让上下文传播显式可验证",
+        "html": "<p>日志traceId、安全上下文、租户ID都是上下文，但传播方式与边界各不相同。不能简单复制一个ThreadLocal就声称所有异步安全；新任务可能在原请求结束后继续运行。Spring Boot当前对自动配置AsyncTaskExecutor可通过spring.task.execution.propagate-context选择观测上下文传播，自定义执行器需要相应TaskDecorator。安全身份和事务仍要按各自机制处理。测试时同时检查正常值、异常清理和下一次请求不会继承上次数据。</p><p>一手阅读：<a href=\"https://docs.oracle.com/en/java/javase/21/core/virtual-threads.html\">JDK21 Virtual Threads</a>；<a href=\"https://docs.spring.io/spring-boot/reference/actuator/observability.html\">Spring Boot 上下文传播</a>；<a href=\"https://docs.spring.io/spring-boot/reference/features/spring-application.html\">Spring Boot 虚拟线程</a>。遇到不明白的输出、时序或取舍，请把你的推理发给学习助手继续追问。</p><p>关闭请求或取消任务时应保留中断语义。代码捕获InterruptedException后若继续无限循环，会破坏退出预算；应终止工作或按调用约定恢复中断状态。虚拟线程演示成功只能证明基本运行，是否改善课堂服务的吞吐仍需要相同负载条件下的对照实验。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "启用虚拟线程后，数据库连接池容量会怎样？",
+      "options": [
+        "自动无限增长",
+        "仍受独立限制",
+        "随线程数翻倍"
+      ],
+      "answer": 1,
+      "explanation": "虚拟线程降低等待线程成本，不改变数据库连接和吞吐容量；需要独立的有界资源策略。"
+    },
+    "exercise": {
+      "task": "运行虚拟线程并检查跨线程状态的边界。",
+      "steps": [
+        "在Java21 jshell执行示例，观察virtual=true。",
+        "在提交任务前创建普通ThreadLocal并设值，任务内读取，解释结果。",
+        "把模拟任务改为抛出异常，观察Future.get的失败。",
+        "写出启用Boot开关后仍需监测的连接池、CPU、内存三项。"
+      ],
+      "expected": "虚拟线程确实创建；普通ThreadLocal不会自动传播；任务异常可被观察。",
+      "solution": "异步边界需显式设计上下文与错误处理；虚拟线程负责调度，不负责事务继承、数据库扩容和业务幂等。"
+    },
+    "sources": [
+      {
+        "title": "JDK21 Virtual Threads",
+        "url": "https://docs.oracle.com/en/java/javase/21/core/virtual-threads.html"
+      },
+      {
+        "title": "Spring Boot 上下文传播",
+        "url": "https://docs.spring.io/spring-boot/reference/actuator/observability.html"
+      },
+      {
+        "title": "Spring Boot 虚拟线程",
+        "url": "https://docs.spring.io/spring-boot/reference/features/spring-application.html"
+      }
+    ],
+    "lab": "独立 Java21 jshell；Boot配置为可选实验"
+  },
+  {
+    "id": 41,
+    "slug": "webflux-reactor",
+    "title": "WebFlux、Reactor 与背压的边界",
+    "phase": "08 · Spring 生态与架构",
+    "minutes": 30,
+    "prerequisites": [
+      "第40课：并发模型",
+      "第39课：超时与隔离"
+    ],
+    "goal": "比较MVC与WebFlux，并正确组合非阻塞流与阻塞依赖。",
+    "bridge": "Promise表达一次结果，Observable表达结果序列；Mono与Flux也表达异步数据，但还要处理订阅、背压和调度。",
+    "sections": [
+      {
+        "title": "先识别现有依赖",
+        "html": "<p>WebFlux采用非阻塞模型，以少量事件循环线程服务许多等待中的请求；Spring MVC采用更直接的命令式模型，可以与虚拟线程结合。已有JDBC/JPA阻塞访问的任务服务，先用MVC通常更易理解与维护；不能因为响应返回Mono就宣称整条链路已经非阻塞。WebClient也可在MVC项目中使用，不必为了调用一个远程接口迁移整个应用。选择依据是等待特征、依赖支持、团队调试能力和实测收益。</p>"
+      },
+      {
+        "title": "Mono与Flux描述执行过程",
+        "html": "<p>Mono代表零或一个值，Flux代表零到多个值；多数冷发布者在订阅时才执行。map做同步值转换，flatMap组合返回Publisher的异步操作，flatMap并发会影响输出次序，concatMap更侧重逐项顺序。异常也是流的信号，应使用onError等策略处理，而不是在外面try/catch期待捕获稍后发生的错误。Web框架通常负责订阅HTTP处理链，业务方法里随手subscribe会使错误、生命周期和取消脱离请求。</p>"
+      },
+      {
+        "title": "背压并不等于无限缓存",
+        "html": "<p>背压让消费者表达需求量，但外部数据源不一定能减速，必要时只能有界缓冲、丢弃或失败。onBackpressureBuffer如果不限制容量会把慢消费者变成内存问题。下面是独立Reactor片段，需要相应依赖；它不是已并入task-service的完整功能。遗留阻塞调用可暂时隔离到boundedElastic，但不会因此变成真正非阻塞数据库驱动，仍要限制并发。</p><pre><code>Mono&lt;TaskView&gt; result = Mono.fromCallable(() -&gt; legacyDao.load(42L))\n    .subscribeOn(Schedulers.boundedElastic()) // 隔离阻塞，保留资源预算\n    .timeout(Duration.ofMillis(300));\n\nFlux&lt;TaskView&gt; ordered = Flux.just(42L, 43L)\n    .concatMap(id -&gt; remoteClient.find(id)); // 逐项保持输出顺序\n// 不在事件循环上调用block()或Thread.sleep()。</code></pre>"
+      },
+      {
+        "title": "用可观察的测试选择模型",
+        "html": "<p>选一个高等待、低CPU的接口，对MVC平台线程、MVC虚拟线程和纯非阻塞链分别设计同等资源测试。记录吞吐、p95、线程、连接等待与代码复杂度。用StepVerifier可检查流的值、错误和完成信号，还应测试取消是否释放资源。ThreadLocal不是Reactor Context，跨调度线程时要正确传播观测与身份信息。不要为了课程覆盖面把MVC主项目强行混入两种服务端栈；本课首先完成模型判断，再在独立分支做小范围增量。</p><p>一手阅读：<a href=\"https://docs.spring.io/spring-framework/reference/web/webflux/new-framework.html\">Spring WebFlux 模型与适用性</a>；<a href=\"https://projectreactor.io/docs/core/release/reference/coreFeatures/schedulers.html\">Reactor 调度器</a>。把你的实验记录和取舍理由发给学习助手，可以继续追问并获得反馈。</p><p>响应式代码中的重试通常会重新订阅上游，若上游包含副作用，可能再次执行写入。不要因为操作符名叫retry就忽略第33课的幂等要求。流完成、出错和取消都可能触发资源清理，测试应覆盖三个终止方式，并观察连接是否真正归还。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "WebFlux事件循环中直接调用阻塞JDBC，主要风险是什么？",
+      "options": [
+        "数据库自动切换",
+        "响应必定会乱序",
+        "事件循环被占用"
+      ],
+      "answer": 2,
+      "explanation": "少量事件循环线程被阻塞时会影响许多请求；应选择MVC或显式隔离遗留阻塞调用并设预算。"
+    },
+    "exercise": {
+      "task": "给三个API选择并发模型并写依据。",
+      "steps": [
+        "任务CRUD使用JPA；聚合十个远程异步接口；CPU密集图像处理。",
+        "分别写MVC、虚拟线程、WebFlux哪种有价值以及依赖前提。",
+        "为Reactor片段增加超时错误预期和取消测试思路。",
+        "说明flatMap和concatMap对吞吐与顺序的取舍。"
+      ],
+      "expected": "不会把CPU计算或JPA访问称作自动非阻塞；每个选择都有资源与复杂度理由。",
+      "solution": "CRUD优先MVC，虚拟线程可改善I/O等待扩展性；大量非阻塞聚合可评估WebFlux；CPU计算要控制计算并行度。"
+    },
+    "sources": [
+      {
+        "title": "Spring WebFlux 模型与适用性",
+        "url": "https://docs.spring.io/spring-framework/reference/web/webflux/new-framework.html"
+      },
+      {
+        "title": "Reactor 调度器",
+        "url": "https://projectreactor.io/docs/core/release/reference/coreFeatures/schedulers.html"
+      }
+    ],
+    "lab": "独立架构与Reactor增量设计；不混入现有MVC项目"
+  },
+  {
+    "id": 42,
+    "slug": "modulith-service-boundaries",
+    "title": "模块化单体、Modulith 与微服务边界",
+    "phase": "08 · Spring 生态与架构",
+    "minutes": 30,
+    "prerequisites": [
+      "第34课：事件一致性",
+      "事务与分层基础"
+    ],
+    "goal": "按业务能力划模块，并用可验证依赖规则决定是否需要拆服务。",
+    "bridge": "前端按业务feature组织代码比巨型components目录更有边界；后端业务模块也应围绕能力和数据所有权组织。",
+    "sections": [
+      {
+        "title": "先模块化，再考虑独立部署",
+        "html": "<p>任务、通知、身份可以是不同业务能力，但不意味着马上拆成三个网络服务。模块化单体共享部署与进程，可保留简单事务和本地调用，同时通过API和包约束减少耦合。微服务增加独立扩缩容与发布能力，也引入网络失败、分布式数据一致性、观测、权限和运行成本。拆分依据是业务边界、团队责任和不同的变化节奏，而不是代码行数或“生产必须微服务”。先让边界在代码中成立，再验证部署拆分是否有收益。</p>"
+      },
+      {
+        "title": "模块公开什么、隐藏什么",
+        "html": "<p>任务模块可以暴露TaskManagement和TaskCompleted事件，隐藏JPA实体、Repository和表结构。通知模块应通过API或事件获知变化，而非直接import任务内部Repository。单体内跨模块也要考虑事件发生在事务提交前还是后；异步监听失败需要可靠恢复，不能误把进程内事件当持久消息。Spring Modulith以约定的包结构识别应用模块，支持结构校验与模块测试，能让“不要越界”变成可以失败的自动检查。</p>"
+      },
+      {
+        "title": "把依赖约束写成验证",
+        "html": "<p>下面是待引入Modulith依赖后的测试片段；当前task-service并未因此自动拥有模块边界检查。包布局应以应用根包下的直接子包表示业务模块，内部实现放internal等子包。调用verify检查循环依赖和非法内部访问，命名接口可进一步表达允许依赖。工具发现结构问题并不证明业务边界划分一定合理，还需要一起变化的数据与用例分析。</p><pre><code>// 独立增量测试：添加兼容Boot版本的Modulith测试依赖后使用。\n@Test\nvoid moduleBoundariesAreValid() {\n    ApplicationModules.of(TaskApplication.class).verify();\n}\n\n// 推荐业务结构示意：\n// app.task      -&gt; 公开任务用例与事件\n// app.task.internal -&gt; 实体和Repository\n// app.notification  -&gt; 订阅任务事实，拥有自己的数据</code></pre>"
+      },
+      {
+        "title": "设计一次真正的拆分决策",
+        "html": "<p>假设通知发送量是任务写入的五十倍，可独立扩容可能有价值；仍需说明通知积压是否影响任务创建、重复邮件如何处理、失败如何重试、谁拥有模板。若两个候选服务每次调用都要跨服务事务，它们可能属于同一一致性边界。写一份短ADR：当前痛点、保留单体方案、拆分方案、数据迁移、回滚、判断收益的指标。可维护的模块化单体是合理结果，不需要为了作业强行选择分布式系统。</p><p>一手阅读：<a href=\"https://docs.spring.io/spring-modulith/reference/fundamentals.html\">Modulith 基础</a>；<a href=\"https://docs.spring.io/spring-modulith/reference/verification.html\">Modulith 结构验证</a>。把你的实验记录和取舍理由发给学习助手，可以继续追问并获得反馈。</p><p>公共接口也要保持小而稳定。把所有内部类型标记为public会让包边界失去意义；为跨模块用例定义少量参数与结果模型，更容易后来拆服务。共享工具模块如果逐渐包含业务规则，常常意味着边界正在退化，应通过依赖检查和评审及时发现。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "模块拆分最应优先依据什么？",
+      "options": [
+        "业务数据边界",
+        "文件数量平均",
+        "框架名称不同"
+      ],
+      "answer": 0,
+      "explanation": "业务能力和数据一致性约束决定边界；代码数量或技术名称不足以证明独立服务的收益。"
+    },
+    "exercise": {
+      "task": "为任务与通知写一份模块边界ADR。",
+      "steps": [
+        "列出每个模块拥有的数据、公开用例与事件。",
+        "找出一条禁止的内部Repository依赖。",
+        "写出模块依赖图并检查是否成环。",
+        "比较独立部署前后的故障处理和事务变化。"
+      ],
+      "expected": "模块有明确数据所有权；禁止跨模块直读内部实现；拆分理由能用证据检验。",
+      "solution": "先用公开用例或事件隔离，再考虑独立部署；强事务关联数据可留在同一模块。通过结构测试预防依赖退化。"
+    },
+    "sources": [
+      {
+        "title": "Modulith 基础",
+        "url": "https://docs.spring.io/spring-modulith/reference/fundamentals.html"
+      },
+      {
+        "title": "Modulith 结构验证",
+        "url": "https://docs.spring.io/spring-modulith/reference/verification.html"
+      }
+    ],
+    "lab": "独立ADR设计；Modulith测试是项目进阶增量"
+  },
+  {
+    "id": 43,
+    "slug": "spring-cloud-compatibility",
+    "title": "Spring Cloud：Gateway、Config 与服务发现",
+    "phase": "08 · Spring 生态与架构",
+    "minutes": 35,
+    "prerequisites": [
+      "第42课：服务边界",
+      "第39课：依赖保护"
+    ],
+    "goal": "明确Cloud组件的职责，并用官方兼容表管理Boot与Cloud版本。",
+    "bridge": "开发代理集中路由接口；生产网关也路由请求，但还涉及认证边界、限流、超时和多实例发现。",
+    "sections": [
+      {
+        "title": "按问题选组件",
+        "html": "<p>Gateway负责入口路由、过滤与跨切面策略；Config集中提供外部配置；Discovery帮助寻找服务实例；LoadBalancer选择具体实例。一个服务用固定地址和环境配置就能运行，不必先部署整套注册中心。Kubernetes已提供服务发现时也要评估是否还需要额外注册机制。配置中心不能替代密钥管理，网关认证不能替代业务服务中的资源授权。每增加一个控制组件，就增加需要监控、升级和恢复的依赖。</p>"
+      },
+      {
+        "title": "先查兼容表再复制依赖",
+        "html": "<p>本课程主线Java21、Spring Boot4.1.1。2026年9月核对的Spring Cloud官方表将2025.1.x列为Boot4.0/4.1兼容系列，其中Boot4.1支持从2025.1.2开始。后续学习时重新查表，不要把日期敏感选择永久写死。通过Cloud BOM协调组件版本，不单独混装不同代Gateway、Config、Commons。以下展示BOM结构，版本值需从当次官方兼容表或Initializr生成，未核对时不添加到现有项目。</p><pre><code>&lt;dependencyManagement&gt;\n  &lt;dependencies&gt;\n    &lt;dependency&gt;\n      &lt;groupId&gt;org.springframework.cloud&lt;/groupId&gt;\n      &lt;artifactId&gt;spring-cloud-dependencies&lt;/artifactId&gt;\n      &lt;version&gt;${spring-cloud.version}&lt;/version&gt;\n      &lt;type&gt;pom&lt;/type&gt;\n      &lt;scope&gt;import&lt;/scope&gt;\n    &lt;/dependency&gt;\n  &lt;/dependencies&gt;\n&lt;/dependencyManagement&gt;</code></pre>"
+      },
+      {
+        "title": "配置拉取也会失败",
+        "html": "<p>Config Client可通过spring.config.import指定配置源；加optional表示配置不可用时允许继续，若关键生产配置缺失不应默认静默启动。明确哪些配置可动态刷新、哪些必须重启，以及回滚到哪份配置版本。服务发现返回实例不代表实例此刻健康，客户端仍需要超时和失败处理。网关路由要保留请求ID，正确处理路径重写和转发头信任范围；允许用户随意控制目标URL会造成开放代理或SSRF风险。</p>"
+      },
+      {
+        "title": "做小而完整的链路实验",
+        "html": "<p>在独立增量实验里建一个网关路由到任务服务，先固定本地地址验证，再考虑发现机制。测试正常访问、后端不可达、认证失败、路径不存在四种反馈。不要向已有MVC主程序同时塞入不兼容的网关服务端栈；Gateway有不同运行模型，按当前文档选择并独立部署。配置中心失效演练要说明启动时与运行中各有什么行为。最终交付应该包含依赖树和兼容依据，而不是仅一段能编译的路由配置。</p><p>一手阅读：<a href=\"https://cloud.spring.io/\">Spring Cloud 兼容表</a>；<a href=\"https://docs.spring.io/spring-cloud-gateway/reference/\">Spring Cloud Gateway</a>；<a href=\"https://docs.spring.io/spring-cloud-config/reference/client.html\">Config Client</a>。把你的实验记录和取舍理由发给学习助手，可以继续追问并获得反馈。</p><p>从当前版本生成依赖后，保存依赖树与启动验证。能下载依赖不等于兼容，能启动也不等于路由、鉴权与配置刷新全部正确。升级时先在隔离分支验证真实请求，再推进主线；不要通过关闭版本兼容校验来掩盖不匹配，否则运行时错误更难定位。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "加入Spring Cloud前，首先要确认哪项条件？",
+      "options": [
+        "社区示例点赞",
+        "发布列车兼容",
+        "所有组件最新"
+      ],
+      "answer": 1,
+      "explanation": "Cloud版本依赖Boot代际，BOM与官方兼容表决定可组合的版本；不能各自选择最新版本硬拼。"
+    },
+    "exercise": {
+      "task": "给任务服务设计最小Cloud试验方案。",
+      "steps": [
+        "在官方兼容表记录Boot4.1对应Cloud系列与检查日期。",
+        "写出网关、任务服务、可选配置中心三者的数据流。",
+        "选择固定地址或发现机制并说明为什么。",
+        "列出正常、后端超时、无权限、配置源不可用的预期HTTP或启动行为。"
+      ],
+      "expected": "版本依据可追溯；每个新增组件有明确目的；不会关闭兼容检查来强行启动。",
+      "solution": "先独立网关加一条路由，验证鉴权与超时。需要集中配置或动态实例时再增组件，并保持BOM管理。"
+    },
+    "sources": [
+      {
+        "title": "Spring Cloud 兼容表",
+        "url": "https://spring.io/projects/spring-cloud/"
+      },
+      {
+        "title": "Spring Cloud Gateway",
+        "url": "https://docs.spring.io/spring-cloud-gateway/reference/"
+      },
+      {
+        "title": "Config Client",
+        "url": "https://docs.spring.io/spring-cloud-config/reference/client.html"
+      }
+    ],
+    "lab": "独立Cloud架构增量；不修改主线依赖"
+  },
+  {
+    "id": 44,
+    "slug": "spring-batch-restart",
+    "title": "Spring Batch：分块、checkpoint 与重启",
+    "phase": "08 · Spring 生态与架构",
+    "minutes": 30,
+    "prerequisites": [
+      "数据库事务",
+      "第33课：幂等"
+    ],
+    "goal": "设计十万行导入任务，使失败后从可证明的检查点恢复。",
+    "bridge": "前端文件上传完成不代表导入完成；后端批任务要把长流程拆开，保存进度并给用户查询状态。",
+    "sections": [
+      {
+        "title": "区分业务批次与执行尝试",
+        "html": "<p>Job定义批处理流程；Step是其中一步；JobInstance由Job与具有识别作用的JobParameters确定；JobExecution是一次运行尝试。比如导入2026-09-22的任务文件，第一次失败后用相同识别参数重启，仍属于同一个业务批次。每次随意添加当前时间参数会创建新实例，从头重跑而不是恢复。Batch保存元数据并提供重启机制，但它不自动知道哪些输入属于哪天，Reader必须按业务参数选择数据。</p>"
+      },
+      {
+        "title": "chunk 把事务大小控制住",
+        "html": "<p>典型chunk步骤按Reader读取、Processor转换、Writer批量写入组织，每个chunk在事务边界提交，并保存执行上下文用于恢复。chunk过大会占更多内存、持锁更久且失败重做更多；太小则提交开销高。不是所有Step都必须是chunk，简单清理或检查可用Tasklet。跳过坏数据必须有上限和审计，不能把所有异常都skip后宣布导入成功。重试适合临时故障，格式错误需要明确拒绝记录。</p>"
+      },
+      {
+        "title": "把检查点与业务效果放到同一边界",
+        "html": "<p>下面用算法描述稳定输入与检查点，避免照搬旧Spring Batch版本的Builder API；Boot4对应的Batch6应按官方当前文档选择构建方式。真实实现应使用JobRepository和ExecutionContext提供的持久进度，不自行发明一个内存计数器。即使chunk事务正确，写外部邮件或HTTP仍不自动与数据库同事务，需要幂等或outbox。</p><pre><code>输入：固定文件hash=abc，businessDate=2026-09-22\nJobInstance：importTasks + fileHash + businessDate\nchunk=100：读取101..200 -&gt; 校验 -&gt; 写库 -&gt; 保存checkpoint=200 -&gt; 提交\n读取201..300期间失败 -&gt; 本chunk回滚\n相同识别参数重启 -&gt; 从checkpoint之后恢复\n// 真实Reader要稳定排序，并支持保存/恢复位置。</code></pre>"
+      },
+      {
+        "title": "输入变化会破坏恢复假设",
+        "html": "<p>分页读数据库时若没有稳定排序，任务运行中新增或删除数据会改变页边界，恢复时可能跳行或重复。可使用固定时间范围、快照或按唯一递增键推进，并结合幂等写入。文件导入应记录hash或版本，避免失败重启时换了一份同名文件。验证时在第250条制造异常，检查前两个100条chunk已提交、第三个回滚，再恢复并核对总数与重复数。元数据库要可靠保存，清空它会丢失历史执行和重启依据。</p><p>一手阅读：<a href=\"https://docs.spring.io/spring-batch/reference/domain.html\">Spring Batch 领域模型</a>；<a href=\"https://docs.spring.io/spring-batch/reference/step/chunk-oriented-processing.html\">Spring Batch 分块处理</a>。把你的实验记录和取舍理由发给学习助手，可以继续追问并获得反馈。</p><p>业务文件含重复行时也必须有明确语义：拒绝整个批次、保留第一次，或按业务键覆盖，都应先定义再编码。导入成功报告要包含读入、写入、跳过与失败数量，并让它们能对账。只有进度条到百分之百，却说不清丢掉了哪些行，不能算可靠批处理。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "希望恢复同一业务批次，识别参数应该怎样？",
+      "options": [
+        "总是清空参数",
+        "每次随机生成",
+        "保持业务标识"
+      ],
+      "answer": 2,
+      "explanation": "相同Job与识别参数定位同一个JobInstance，才可利用已有执行上下文；新参数通常创建新实例。"
+    },
+    "exercise": {
+      "task": "设计一个每批100条、在第250条失败的导入恢复实验。",
+      "steps": [
+        "固定输入文件hash与业务日期，定义JobInstance参数。",
+        "列出失败时数据库已提交条数与checkpoint。",
+        "修复错误后用相同参数重启，核对最终1000条不重复。",
+        "再加入文件被替换、重复启动与坏行过多三种情况。"
+      ],
+      "expected": "预期前200条已提交，失败chunk回滚；恢复后总数1000且无重复；输入变化必须被发现。",
+      "solution": "稳定输入、持久元数据、checkpoint和业务事务共同决定可恢复性；外部副作用另做幂等与可靠投递。"
+    },
+    "sources": [
+      {
+        "title": "Spring Batch 领域模型",
+        "url": "https://docs.spring.io/spring-batch/reference/domain.html"
+      },
+      {
+        "title": "Spring Batch 分块处理",
+        "url": "https://docs.spring.io/spring-batch/reference/step/chunk-oriented-processing.html"
+      }
+    ],
+    "lab": "独立Batch作业设计；实现作为毕业项目可选扩展"
+  },
+  {
+    "id": 45,
+    "slug": "integration-scheduling",
+    "title": "Spring Integration、调度与分布式任务",
+    "phase": "08 · Spring 生态与架构",
+    "minutes": 30,
+    "prerequisites": [
+      "第44课：批处理",
+      "第28课：锁边界"
+    ],
+    "goal": "区分定时触发、消息管道和可靠作业执行，避免多实例重复副作用。",
+    "bridge": "浏览器setInterval只是触发回调；服务端@Scheduled也只是调度入口，不自动提供集群唯一执行与可靠重试。",
+    "sections": [
+      {
+        "title": "触发时间不是业务保证",
+        "html": "<p>@Scheduled可按固定延迟、固定速率或cron触发；fixedDelay围绕上次结束后的间隔，fixedRate围绕固定时间节奏，实际并发仍取决于调度器和执行方式。时区和夏令时会影响日历调度，业务日期要显式定义。部署两个应用实例通常就有两个本地定时器，不能假设只执行一次。进程停机错过的触发是否补跑、一次执行过长是否重叠，都必须在作业语义里约定。</p>"
+      },
+      {
+        "title": "把定时器变成轻量入口",
+        "html": "<p>下面是教学触发片段，仅唤醒扫描逻辑；真正任务由持久表记录，按业务主键和运行日期唯一约束领取。不同实例竞争领取时，通过数据库原子状态迁移或有界租约决定责任。即使租约超时后旧执行者恢复，也要靠幂等业务写或版本约束避免重复副作用。不要把所有工作放进一个永不返回的调度方法，也不要在线程池排队无限多相同扫描任务。</p><pre><code>@Scheduled(fixedDelayString = &quot;${course.scan-delay:5000}&quot;)\nvoid scanDueWork() {\n    // 只领取有限批次，不在这里假定集群全局唯一。\n    // 唯一键可用(job_name, business_date, entity_id)。\n    runner.claimAndExecuteBoundedBatch();\n}\n// cron示例：@Scheduled(cron=&quot;0 0 2 * * *&quot;, zone=&quot;Asia/Shanghai&quot;)</code></pre>"
+      },
+      {
+        "title": "Integration 用管道连接异构系统",
+        "html": "<p>Spring Integration提供Message、Channel、Endpoint及转换器、路由器、适配器，适合把文件、数据库、HTTP等集成为消息流。消息包含payload和headers，DirectChannel的调用链可在同一线程，QueueChannel引入队列与轮询消费者。选择异步通道就引入排队、失败传播与事务边界变化；一个普通内存队列不会在重启后自动恢复。Poller负责按节奏读取可轮询源，必须设批量、超时和错误处理，避免下游慢时继续无界灌入。</p>"
+      },
+      {
+        "title": "选工具时看恢复与规模",
+        "html": "<p>简单进程内维护工作可用@Scheduled；有checkpoint的大量数据处理用Batch；异构消息路由用Integration；需要持久触发与集群调度可评估Quartz等专门调度器或平台任务能力。框架名称不是互斥选择：调度器可以触发Batch，Integration可以接入输入，但业务幂等仍独立存在。实验从两个实例同时扫描一项过期任务开始，记录领取者、尝试号、完成状态与失败原因，证明重复触发不会重复关闭任务或发送通知。</p><p>一手阅读：<a href=\"https://docs.spring.io/spring-framework/reference/integration/scheduling.html\">Spring 调度与任务执行</a>；<a href=\"https://docs.spring.io/spring-integration/reference/polling-consumer.html\">Integration Poller</a>。把你的实验记录和取舍理由发给学习助手，可以继续追问并获得反馈。</p><p>作业状态表需要监测卡住的RUNNING记录和持续失败的RETRY记录。运维重试按钮应生成审计记录，而不是直接把所有状态清零。即便选择成熟调度平台，也应验证它重新投递一次任务时，数据库更新和外部通知是否仍满足业务不变量。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "两个应用实例都启用同一@Scheduled，默认会怎样？",
+      "options": [
+        "各自执行定时器",
+        "自动选择主节点",
+        "共享一个任务锁"
+      ],
+      "answer": 0,
+      "explanation": "本地调度默认每实例独立执行，集群唯一责任需要额外协调，业务仍应幂等。"
+    },
+    "exercise": {
+      "task": "设计多实例的过期任务提醒。",
+      "steps": [
+        "定义唯一业务键：提醒类型、任务ID、业务日期。",
+        "画出PENDING到RUNNING到DONE或RETRY的状态迁移。",
+        "模拟两个实例竞争领取及执行者崩溃。",
+        "指出调度器、Batch、Integration在该需求中的可选职责。"
+      ],
+      "expected": "重复触发不重复发送，崩溃任务可重领；消息或外部通知仍使用稳定幂等标识。",
+      "solution": "持久状态与唯一约束决定责任，租约只提供可恢复领取。定时器负责唤醒，不负责天然恰好一次执行。"
+    },
+    "sources": [
+      {
+        "title": "Spring 调度与任务执行",
+        "url": "https://docs.spring.io/spring-framework/reference/integration/scheduling.html"
+      },
+      {
+        "title": "Integration Poller",
+        "url": "https://docs.spring.io/spring-integration/reference/polling-consumer.html"
+      }
+    ],
+    "lab": "独立分布式作业设计；调度片段为增量"
+  },
+  {
+    "id": 46,
+    "slug": "containers-ci-kubernetes",
+    "title": "Docker、CI、Kubernetes 与优雅退出",
+    "phase": "09 · 全栈交付与毕业项目",
+    "minutes": 35,
+    "prerequisites": [
+      "第37课：管理端点",
+      "第39课：失败预算"
+    ],
+    "goal": "描述从构建到部署再到终止的完整生命周期，并验证探针语义。",
+    "bridge": "前端产物需要可复现构建与CDN发布；后端镜像还承载运行时、资源限制、依赖连接和在途请求退出。",
+    "sections": [
+      {
+        "title": "一个产物，多套配置",
+        "html": "<p>CI应从干净检出使用固定JDK与Maven Wrapper运行验证，生成可追溯产物，再构建镜像。开发、测试、生产尽量使用同一镜像，通过环境注入配置；不要在镜像里烘焙真实密码。多阶段构建可把编译工具留在构建层，运行镜像使用最小必要运行时并以非root用户执行。镜像标签要可追溯提交，生产最好再固定digest；latest不能说明当前实际运行的是哪份代码。依赖与镜像漏洞需要持续更新流程。</p>"
+      },
+      {
+        "title": "先让本地构建可重复",
+        "html": "<p>以下从工作区根执行，verify不仅编译，还会运行配置的测试与集成验证；具体外部依赖前提以README为准。部署前检查数据库迁移向后兼容，采用先扩展字段、滚动升级、最后收缩的方式，避免新旧实例并存时字段不兼容。回滚应用镜像不自动回滚数据库数据变更，删除列或批量改数据必须有单独恢复策略。</p><pre><code>./mvnw -f examples/pom.xml verify\n# 应用终止预算教学配置：\n# server.shutdown=graceful\n# spring.lifecycle.timeout-per-shutdown-phase=20s\n# 部署端terminationGracePeriodSeconds应覆盖应用清理与流量摘除预算。</code></pre>"
+      },
+      {
+        "title": "三种探针不能随意合并",
+        "html": "<p>startup保护慢启动过程；readiness决定是否继续接收流量；liveness判断进程是否需要重启。数据库暂时不可用时把liveness判死，可能让全部实例一起重启且无法改善数据库，形成重启风暴。readiness是否包含某外部依赖，应根据服务能否提供有用响应以及是否造成所有副本同时摘除来判断。管理端口健康不代表业务端口可接收流量，探针路径和端口要验证。共享依赖故障尤其需要谨慎设计。</p>"
+      },
+      {
+        "title": "退出也是必须测试的功能",
+        "html": "<p>收到终止信号后，平台应停止导流，应用停止接新请求并让在途请求在预算内完成，同时停止领取新后台任务。连接池、消费者和outbox发布器需要有序关闭；超时未完成的工作必须能通过幂等与持久进度恢复。Kubernetes的终止宽限期包含退出过程，preStop若阻塞过久会挤占应用清理时间。只在隔离环境发送终止信号，观察在途请求、连接释放和消息重放。容器成功启动只能证明启动，不能证明滚动升级无损。</p><p>一手阅读：<a href=\"https://docs.docker.com/build/building/multi-stage/\">Docker 多阶段构建</a>；<a href=\"https://kubernetes.io/docs/concepts/workloads/pods/probes/\">Kubernetes 探针</a>；<a href=\"https://docs.spring.io/spring-boot/reference/web/graceful-shutdown.html\">Spring Boot 优雅退出</a>。把你的实验记录和取舍理由发给学习助手，可以继续追问并获得反馈。</p><p>资源限制也属于部署契约。JVM堆以外还有线程、直接缓冲和本地内存，容器内存限制不能只等于最大堆。应用被平台强制终止后没有机会执行finally，因此数据库事务、outbox和消费幂等必须在没有正常退出回调的情形下也能够恢复。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "数据库短暂故障时，最不应直接采用什么做法？",
+      "options": [
+        "记录依赖错误",
+        "存活失败重启",
+        "限制回源压力"
+      ],
+      "answer": 1,
+      "explanation": "共享数据库故障通常不能靠重启应用修复；把它纳入liveness可能引发全实例重启风暴。"
+    },
+    "exercise": {
+      "task": "制定一次安全的本地发布与退出验收。",
+      "steps": [
+        "运行根verify并记录通过与跳过的测试。",
+        "检查镜像构建中的JDK、用户、配置与产物来源。",
+        "为startup/readiness/liveness分别写失败条件。",
+        "隔离环境发起慢请求后终止进程，记录请求是否结束、后台工作如何恢复。"
+      ],
+      "expected": "验证报告区分构建、启动、退出与恢复；未运行K8s不得声称滚动升级已验证。",
+      "solution": "同一产物外部注入配置；探针职责分离；退出与部署预算对齐，后台工作由持久状态和幂等恢复。"
+    },
+    "sources": [
+      {
+        "title": "Docker 多阶段构建",
+        "url": "https://docs.docker.com/build/building/multi-stage/"
+      },
+      {
+        "title": "Kubernetes 探针",
+        "url": "https://kubernetes.io/docs/concepts/workloads/pods/probes/"
+      },
+      {
+        "title": "Spring Boot 优雅退出",
+        "url": "https://docs.spring.io/spring-boot/reference/web/graceful-shutdown.html"
+      }
+    ],
+    "lab": "examples/task-service + 构建；K8s部署与退出为进阶实验"
+  },
+  {
+    "id": 47,
+    "slug": "fullstack-contract-security",
+    "title": "全栈联调：OpenAPI、BFF 与安全契约",
+    "phase": "09 · 全栈交付与毕业项目",
+    "minutes": 35,
+    "prerequisites": [
+      "Spring Security与HTTP",
+      "第36课：schema演进"
+    ],
+    "goal": "把前端表单到后端事务的契约连起来，并区分CORS、CSRF与授权。",
+    "bridge": "这是把你已有的前端能力与后端连接的一课：接口类型、错误反馈、身份、并发冲突都要形成一条用户流程。",
+    "sections": [
+      {
+        "title": "契约要覆盖失败与并发",
+        "html": "<p>OpenAPI描述路径、方法、参数、schema、响应与安全方案；类型生成能减少拼写错误，但不能代替运行时校验和服务端授权。任务状态更新必须包含version，两个浏览器同时编辑时，一个更新成功，另一个收到明确冲突并提示重新加载。错误契约需包含稳定错误码、可理解信息和请求标识，而不是把堆栈返回浏览器。Java long可能超出JavaScript安全整数范围，标识符用字符串可避免精度问题；时间使用明确时区。</p>"
+      },
+      {
+        "title": "浏览器安全不是一个开关",
+        "html": "<p>CORS决定哪些来源可在浏览器中读取跨域响应，不是身份认证或服务端防火墙。CSRF防止浏览器自动附带身份的跨站写请求；cookie或浏览器管理的HTTP Basic等情况需要考虑。XSS是脚本执行风险，又是另一层问题。当前课堂项目的Basic用户仅服务本地学习，保留CSRF；真实生产应采用合适身份提供方、会话或OAuth2/OIDC方案。不要为解决联调403直接关闭所有安全配置或把允许来源设成带凭据的通配符。</p>"
+      },
+      {
+        "title": "把 CSRF 获取与写请求连起来",
+        "html": "<p>在当前项目的同源、已完成本地认证的浏览器环境中，先获取/api/csrf，再使用响应给出的headerName和token提交。以下演示状态更新（目标任务当前须为IN_PROGRESS），taskId与version应取实际列表详情，不能写死他人资源ID。CSRF令牌不代替权限校验；reader即便有合法CSRF令牌也不能执行writer操作。前端收到409等冲突应保留用户输入并展示差异，不应该自动无上限重试。</p><pre><code>const csrf = await fetch(&quot;/api/csrf&quot;, { credentials: &quot;same-origin&quot; }).then(r =&gt; r.json());\nconst response = await fetch(`/api/tasks/${taskId}/status`, {\n  method: &quot;PATCH&quot;,\n  credentials: &quot;same-origin&quot;,\n  headers: { &quot;Content-Type&quot;: &quot;application/json&quot;, [csrf.headerName]: csrf.token },\n  body: JSON.stringify({ status: &quot;DONE&quot;, version })\n});\nif (!response.ok) {\n  // 根据实际错误契约处理401/403/409；不要把失败当成功更新UI。\n  console.error(&quot;update failed&quot;, response.status);\n}</code></pre>"
+      },
+      {
+        "title": "BFF 聚合也需要边界",
+        "html": "<p>BFF为特定前端聚合后端数据、管理会话或减少往返，但不应复制核心业务规则或绕过资源授权。用户ID应来自服务端验证的身份，不信任请求体自报身份。前后端联调用例至少包含未登录、权限不足、缺少CSRF、非法字段、版本冲突、服务器超时与成功路径。生成客户端后再与真实API执行契约检查；mock只是开发辅助，不能证明鉴权与事务实际成立。完成时应从页面操作追到真实数据库结果与eventId。</p><p>一手阅读：<a href=\"https://spec.openapis.org/oas/v3.1.1.html\">OpenAPI 3.1.1</a>；<a href=\"https://docs.spring.io/spring-security/reference/servlet/integrations/cors.html\">Spring Security CORS</a>；<a href=\"https://docs.spring.io/spring-security/reference/servlet/exploits/csrf.html\">Spring Security CSRF</a>。把你的实验记录和取舍理由发给学习助手，可以继续追问并获得反馈。</p><p>注意示例状态机只允许TODO到IN_PROGRESS再到DONE；如果从TODO直接提交DONE，会得到合法的业务冲突，而非安全配置错误。联调时先确认当前状态，再选择允许的下一状态。把浏览器网络错误、HTTP权限拒绝和业务冲突分开呈现，才能定位真正责任层。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "合法CSRF令牌可以直接证明哪项事实？",
+      "options": [
+        "用户拥有写权限",
+        "业务版本是最新",
+        "请求通过防伪项"
+      ],
+      "answer": 2,
+      "explanation": "CSRF验证与身份授权、业务版本冲突是独立检查；通过一项不能跳过其他项。"
+    },
+    "exercise": {
+      "task": "完成一次双页面并发编辑联调。",
+      "steps": [
+        "以本地writer登录，获取CSRF与同一任务当前version。",
+        "两个页面都使用旧version更新；记录成功和冲突反馈。",
+        "改为reader身份提交相同请求，验证权限拒绝。",
+        "移除CSRF令牌再提交，说明与CORS失败如何区分。"
+      ],
+      "expected": "更新与冲突反馈明确；reader不能越权；缺少CSRF得到拒绝；不会靠关闭安全绕过问题。",
+      "solution": "前端保留失败输入并允许重新获取最新版本；后端分别校验身份、权限、CSRF与version。自动类型生成只解决契约的一部分。"
+    },
+    "sources": [
+      {
+        "title": "OpenAPI 3.1.1",
+        "url": "https://spec.openapis.org/oas/v3.1.1.html"
+      },
+      {
+        "title": "Spring Security CORS",
+        "url": "https://docs.spring.io/spring-security/reference/servlet/integrations/cors.html"
+      },
+      {
+        "title": "Spring Security CSRF",
+        "url": "https://docs.spring.io/spring-security/reference/servlet/exploits/csrf.html"
+      }
+    ],
+    "lab": "examples/task-service；浏览器同源联调增量"
+  },
+  {
+    "id": 48,
+    "slug": "capstone-evidence",
+    "title": "毕业项目：交付证据与故障演练",
+    "phase": "09 · 全栈交付与毕业项目",
+    "minutes": 35,
+    "prerequisites": [
+      "第01–47课核心路径"
+    ],
+    "goal": "交付一个可运行、可解释、可恢复的全栈任务系统，并用证据展示掌握程度。",
+    "bridge": "毕业标准不是看懂教程，而是你能从用户需求到接口、事务、消息、运行环境完成闭环，解释失败时发生什么。",
+    "sections": [
+      {
+        "title": "范围与交付物",
+        "html": "<p>在task-service基础上完成任务协作系统：用户可查询、创建和更新状态，角色与资源权限明确，关系数据库负责真实状态，Redis缓存可重建，Kafka发布与消费有可靠恢复路径。现有示例是起点，不代表毕业项目全部已完成；先阅读README列出的已实现范围。交付README、接口契约、数据库迁移、自动测试、启动命令、架构决策和运维手册。选择性增加批量导入、通知或网关，优先把核心链路做完整。</p>"
+      },
+      {
+        "title": "可计分的验收标准",
+        "html": "<p>评分100分：业务与API20分，含合法与非法输入、分页、状态冲突；数据与事务20分，含迁移、约束、并发不变量；安全15分，含身份、越权、CSRF和敏感日志；缓存与消息20分，含陈旧窗口、回源上限、outbox与消费幂等；交付与观测15分，含可复现构建、健康、延迟及积压；解释与恢复10分，含故障记录和取舍。80分以上且无越权、数据不变量破坏或不可恢复消息丢失才通过。分数来自证据，不能因为文件存在就给满分。</p><pre><code>./mvnw -f examples/pom.xml verify\n# 验收记录至少包含：\n# git版本/工作区状态、Java版本、启动profile、基础设施版本\n# 每条用例的输入、预期、实际结果、时间、日志/测试证据路径\n# 标记 PASS / FAIL / NOT RUN；NOT RUN不能算通过。</code></pre>"
+      },
+      {
+        "title": "按顺序做六次隔离故障演练",
+        "html": "<p>一：两个客户端用同version更新，验证只有一个成功；二：重复eventId投递，验证业务只生效一次；三：Kafka不可用后恢复，验证outbox保留且排空；四：消费者数据库提交后退出、offset未提交，验证重放安全；五：缓存未命中与不可用，验证数据库回源有界；六：进程终止，验证在途请求和后台任务可恢复。只对专用本地环境操作，每次先写停止条件和恢复步骤。未实现的故障注入入口应先补测试钩子或隔离测试，不在共享服务上临时猜测操作。</p>"
+      },
+      {
+        "title": "结果要能被另一个人复核",
+        "html": "<p>证据包应包含成功API结果、一次权限拒绝、一次版本冲突、数据库最终行数或版本、同eventId消费记录、outbox最老待发年龄变化、消费lag恢复、测试报告与构建版本。缓存命中或吞吐数字要附负载条件；应用健康不能代替业务正确性。失败报告记录期望、实际、最小复现、根因、修复与复测，不删除失败记录来制造全绿。找另一位开发者按README从零启动，记录他们卡住的步骤并修订说明。</p>"
+      },
+      {
+        "title": "用复述检查长期掌握",
+        "html": "<p>合上课程后，用五分钟解释一次状态更新从浏览器到数据库、outbox、Kafka消费者的完整路径；再回答数据库提交成功但客户端超时、缓存旧回填、消费者崩溃三个问题。一周后换成库存预留或预约业务重新画流程，检查能否迁移知识。学习记录只写真实完成与证据，不把“教材已生成”当成“已经掌握”。遇到生产取舍，带上具体约束去Spring、Kafka等官方社区或团队评审讨论，实践反馈比背固定答案更有价值。</p><p>一手阅读：<a href=\"https://docs.spring.io/spring-boot/reference/actuator/endpoints.html\">Spring Boot 运行管理端点</a>；<a href=\"https://kafka.apache.org/41/design/design/\">Kafka 交付语义</a>；<a href=\"https://docs.spring.io/spring-boot/reference/web/graceful-shutdown.html\">Spring Boot 优雅退出</a>。把你的实验记录和取舍理由发给学习助手，可以继续追问并获得反馈。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "哪种材料最能支持“消息故障后可恢复”的结论？",
+      "options": [
+        "故障恢复证据",
+        "完整课程目录",
+        "项目编译成功"
+      ],
+      "answer": 0,
+      "explanation": "需要真实故障、持久待发状态、恢复后投递与幂等结果；目录与编译都不能证明运行时恢复。"
+    },
+    "exercise": {
+      "task": "创建一份毕业验收报告并完成首轮评分。",
+      "steps": [
+        "逐项列出评分标准，所有未运行项先标NOT RUN。",
+        "执行已有自动验证和本地成功路径，记录命令与结果。",
+        "依次实施已具备入口的隔离故障实验，其他项写明确待实现任务。",
+        "请他人复核启动与至少一项故障恢复，再根据证据评分。"
+      ],
+      "expected": "报告诚实区分PASS/FAIL/NOT RUN；关键正确性问题未解决时不能毕业。",
+      "solution": "先达成完整可运行闭环，再补故障可恢复性。一次具体的失败复现与修复比多个没有验证的技术名词更能证明能力。"
+    },
+    "sources": [
+      {
+        "title": "Spring Boot 运行管理端点",
+        "url": "https://docs.spring.io/spring-boot/reference/actuator/endpoints.html"
+      },
+      {
+        "title": "Kafka 交付语义",
+        "url": "https://kafka.apache.org/41/design/design/"
+      },
+      {
+        "title": "Spring Boot 优雅退出",
+        "url": "https://docs.spring.io/spring-boot/reference/web/graceful-shutdown.html"
+      }
+    ],
+    "lab": "examples/task-service + 全链路毕业增量；本课计划35分钟，完整项目另需多次实践"
+  }
+]

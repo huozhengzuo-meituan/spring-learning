@@ -1,0 +1,1382 @@
+[
+  {
+    "id": 1,
+    "slug": "toolchain",
+    "title": "把 Java 工具链跑通",
+    "phase": "01 · 基础与 Spring 核心",
+    "minutes": 25,
+    "prerequisites": [
+      "基本 Java 语法"
+    ],
+    "goal": "用同一套工具完成编译、测试和启动，识别版本不匹配。",
+    "bridge": "把 JDK 看成运行时加编译工具，把 Maven 看成依赖解析和构建生命周期；它与 Node/npm 相似，但编译目标和运行时需要分别检查。",
+    "sections": [
+      {
+        "title": "建立可复现的版本基线",
+        "html": "<p>课程使用 Java 21 LTS 和 Spring Boot 4.1.1，目的是在有长期支持的语言基线上学习现代框架。Boot 4 的最低 Java 要求并不等于本课选择的版本：官方当前要求至少 Java 17，并支持 Java 21。Java 25 也是后续可评估的 LTS；学习阶段先固定一个版本，避免把安装、语法和框架升级问题混在一起。LTS 描述支持策略，补丁支持期限仍取决于发行商。</p><p>JDK 包含 java、javac、jshell 等工具。IDE 的 Project SDK、终端的 java、Maven 实际使用的 Java 可能来自不同安装路径。出现 UnsupportedClassVersionError 时，先确认运行字节码的 JVM 版本；遇到 release version 21 not supported，则先确认编译器版本。不要通过删除业务代码去修复环境不一致。</p><p class=\"source-note\">原始资料：<a href=\"https://docs.spring.io/spring-boot/system-requirements.html\">Spring Boot 系统要求</a>。</p>"
+      },
+      {
+        "title": "从依赖到可运行服务",
+        "html": "<p>工作区的 examples 是 Maven 聚合项目，hello-api 用内存保存任务，先让你专注 HTTP 和 Spring。构建命令经历依赖下载、编译、测试、打包等步骤。首次下载慢与测试失败是两种不同证据。看到构建成功只说明当前检查通过；真正监听端口并响应请求，需要再启动服务和调用 API。</p><p>下列命令均从工作区根目录执行。启动命令会一直运行，请另开终端执行 curl。Ctrl+C 停止服务，不等于关闭整个工作区；内存数据会随服务停止丢失，这正是后面引入数据库的动机。</p><pre><code>source scripts/env.sh\njava -version\n./mvnw -version\n./mvnw -f examples/pom.xml verify\n./mvnw -f examples/hello-api/pom.xml spring-boot:run\n# 第二个终端：查看状态行、响应头和 JSON\ncurl -i http://localhost:8081/api/tasks</code></pre><p class=\"source-note\">原始资料：<a href=\"https://github.com/spring-projects/spring-boot/wiki/Spring-Boot-4.0-Migration-Guide\">Boot 4 官方迁移指南</a>。</p>"
+      },
+      {
+        "title": "版本边界与排错顺序",
+        "html": "<p>看到 8081 端口占用时，先识别占用进程，或用命令行参数选择另一个端口，不能把任意 Java 进程全部杀掉。依赖解析失败时检查 Maven 错误中的仓库地址、坐标和网络；不要直接替换成来源不明的仓库。Boot 4 使用 Jakarta 命名空间，并优先使用 Jackson 3；旧教程里的 javax.validation 和 Jackson 2 自定义序列化代码不能照搬。</p><p>为自己保存三条证据：JDK 版本、完整构建命令与结果、一次 API 的状态码。以后求助时提供这三条比“启动不了”更可诊断。完成本课的标准是能从干净终端重复以上过程，并说明哪一步是构建，哪一步是进程运行，哪一步是网络访问。</p><p>当前工作区可从根目录执行source scripts/env.sh选择局部JDK。全新clone若使用系统安装的Java21，请按SETUP.md配置JAVA_HOME，无需执行局部工具链脚本。新的终端需要重新加载对应环境。请保留系统原有工具，不用为了学习直接升级所有项目的全局Java。终端能跑通之后再对齐IDE，可以减少同时排查两套环境的负担。</p><p class=\"source-note\">原始资料：<a href=\"https://github.com/spring-projects/spring-boot/wiki/Spring-Boot-4.0-Migration-Guide\">Boot 4 官方迁移指南</a>。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "IDE 能运行而终端编译失败，优先检查什么？",
+      "options": [
+        "双方工具版本",
+        "业务字段名称",
+        "浏览器缓存值"
+      ],
+      "answer": 0,
+      "explanation": "IDE 与 Maven 可能使用不同 JDK。先对齐环境，再看编译错误，而不是猜测业务逻辑。"
+    },
+    "exercise": {
+      "task": "运行基线，并记录你自己的环境证据。",
+      "steps": [
+        "执行 java -version 与 ./mvnw -version，比较主版本。",
+        "执行聚合 verify，保留失败阶段或 BUILD SUCCESS。",
+        "启动 hello-api，curl /api/tasks，随后 Ctrl+C。"
+      ],
+      "expected": "两个版本命令使用 Java 21；构建成功；GET 返回 HTTP 200 和任务列表。",
+      "solution": "若 Maven 显示其他 Java，调整 JAVA_HOME 或 IDE Maven Runner 的 JDK 后重试。若端口冲突，运行 ./mvnw -f examples/hello-api/pom.xml spring-boot:run -Dspring-boot.run.arguments=--server.port=8181，然后 curl http://localhost:8181/api/tasks。"
+    },
+    "sources": [
+      {
+        "title": "Spring Boot 系统要求",
+        "url": "https://docs.spring.io/spring-boot/system-requirements.html"
+      },
+      {
+        "title": "Boot 4 官方迁移指南",
+        "url": "https://github.com/spring-projects/spring-boot/wiki/Spring-Boot-4.0-Migration-Guide"
+      }
+    ],
+    "lab": "examples/hello-api"
+  },
+  {
+    "id": 2,
+    "slug": "request-journey",
+    "title": "从浏览器请求走到 JVM",
+    "phase": "01 · 基础与 Spring 核心",
+    "minutes": 25,
+    "prerequisites": [
+      "01"
+    ],
+    "goal": "沿请求链定位网络、路由、业务和序列化错误。",
+    "bridge": "前端的 fetch 只是链路起点；后端需要把字节转成参数、执行业务，再按协议返回字节。",
+    "sections": [
+      {
+        "title": "先把边界画清楚",
+        "html": "<p>一次请求通常依次经过浏览器、网络连接、服务器端口、Servlet 容器、过滤器、Spring MVC 分发器、控制器和业务方法。响应再经消息转换器写回网络。Spring Boot 帮你启动嵌入式容器，但不会把网络变成本地函数调用：连接可能失败，请求可能超时，响应可能已经生成却没有到达客户端。</p><p>因此“前端报错”需要拆分。连接拒绝通常说明端口没有服务监听；404 说明 HTTP 已有响应但资源没找到；400 往往说明输入未满足解析或校验要求；500 指向服务器无法正常完成。浏览器的跨域错误也可能发生在服务已经返回之后，必须同时看 Network、服务器日志和 curl 结果。</p><p class=\"source-note\">原始资料：<a href=\"https://www.rfc-editor.org/rfc/rfc9110.html\">HTTP 语义规范 RFC 9110</a>。</p>"
+      },
+      {
+        "title": "协议是两端共同的合同",
+        "html": "<p>URL 路径表达资源位置，查询参数表达筛选或分页；请求头描述内容格式和认证，body 承载结构化数据。Content-Type 声明发送的表示类型，Accept 表达接收方希望获得的类型，两者不能互换。JSON 字段虽然看起来与 JavaScript 对象接近，但它只是文本协议；Java 类型、日期格式、空值和数值范围都必须约定。</p><p>后端不应该相信前端隐藏了按钮就代表请求无法发出。任何人都可用 curl 构造请求。服务器必须独立检查参数和权限；前端校验承担及时反馈，后端校验承担边界保护。观察请求时先记录 method、path、status，再记录敏感信息已脱敏的业务字段。</p><pre><code>curl -i http://localhost:8081/api/tasks\ncurl -i http://localhost:8081/no-such-route\ncurl -i -X POST http://localhost:8081/api/tasks \\\n  -H &quot;Content-Type: application/json&quot; \\\n  --data &#x27;{&quot;title&quot;:&quot;追踪一次请求&quot;}&#x27;</code></pre><p class=\"source-note\">原始资料：<a href=\"https://docs.spring.io/spring-framework/reference/web/webmvc.html\">Spring MVC 文档</a>。</p>"
+      },
+      {
+        "title": "不要混淆请求失败与业务未执行",
+        "html": "<p>假设创建任务已成功写入，响应在网络中断时丢失，前端只会看到失败。如果立即重试，服务器可能创建第二条任务。这说明 HTTP 客户端的异常不能直接证明后端没有执行，后续会通过幂等键处理这个问题。现在先养成习惯：提交后用查询验证状态，不以界面提示作为唯一证据。</p><p>服务线程也不同于浏览器中的单个页面。多个用户的请求会并行进入同一个 JVM，甚至访问同一个控制器实例。请求局部变量适合保存本次处理信息；用户身份、请求对象和临时数据不应放在共享字段。后面理解单例 Bean 时，再把这里的请求链与对象生命周期连接起来。</p><p class=\"source-note\">原始资料：<a href=\"https://docs.spring.io/spring-framework/reference/web/webmvc.html\">Spring MVC 文档</a>。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "curl 得到 404，已经能证明哪件事？",
+      "options": [
+        "业务保存成功",
+        "收到协议响应",
+        "用户权限正确"
+      ],
+      "answer": 1,
+      "explanation": "404 至少说明收到 HTTP 响应，不能证明控制器命中、数据写入或权限正确。"
+    },
+    "exercise": {
+      "task": "对比三种请求结果，画出请求经过的层次。",
+      "steps": [
+        "先启动 hello-api，再执行本课三条 curl。",
+        "记录每个请求的 method、path、status、Content-Type。",
+        "停掉 hello-api，再执行 GET，并把连接错误与 404 对比。"
+      ],
+      "expected": "运行中合法 GET 为 200，不存在路径为 404；停服后是连接失败而没有应用生成的 HTTP 状态码。",
+      "solution": "流程可写为 curl→TCP端口→容器→过滤器→DispatcherServlet→Controller→Service→消息转换器。连接失败停在入口之前；404发生在已有HTTP服务之后；POST成功后再次GET可确认新任务。"
+    },
+    "sources": [
+      {
+        "title": "HTTP 语义规范 RFC 9110",
+        "url": "https://www.rfc-editor.org/rfc/rfc9110.html"
+      },
+      {
+        "title": "Spring MVC 文档",
+        "url": "https://docs.spring.io/spring-framework/reference/web/webmvc.html"
+      }
+    ],
+    "lab": "examples/hello-api"
+  },
+  {
+    "id": 3,
+    "slug": "modern-java",
+    "title": "用 record 和 Optional 表达边界",
+    "phase": "01 · 基础与 Spring 核心",
+    "minutes": 30,
+    "prerequisites": [
+      "02"
+    ],
+    "goal": "在 Java 21 中写清数据、不存在与失败三种状态。",
+    "bridge": "TypeScript 的类型主要在编译后消失；Java 的类同时参与运行时映射。record 很适合 API DTO，但不代表所有对象都深度不可变。",
+    "sections": [
+      {
+        "title": "record 是数据载体而非万能实体",
+        "html": "<p>record 自动提供构造器、访问器、equals、hashCode 和 toString，适合任务查询结果这类稳定数据。访问器名是 title()，不是 getTitle()。它的组件字段不可重新赋值，但如果组件指向可变 List，列表内容仍可能被修改；要得到更可靠的值对象，通常在构造时做防御性复制。</p><p>record 的简洁应服务业务表达。构造器可以维护不变量，如标题不能为空；它不是替代边界校验的理由。持久化实体通常有生命周期和框架映射要求，后面的 JPA 课程会使用普通类。不要为了少写代码把请求 DTO、数据库实体、响应对象强行变成同一个类型。</p><pre><code>import java.util.*;\nrecord TaskView(long id, String title, List&lt;String&gt; tags) {\n  public TaskView {\n    if (title == null || title.isBlank()) {\n      throw new IllegalArgumentException(&quot;title is blank&quot;);\n    }\n    tags = List.copyOf(tags); // 复制集合，避免外部修改泄漏进来\n  }\n}\nvar tags = new ArrayList&lt;String&gt;();\ntags.add(&quot;spring&quot;);\nvar view = new TaskView(1, &quot;学习&quot;, tags);\ntags.add(&quot;changed&quot;);\nSystem.out.println(view.tags());</code></pre><p class=\"source-note\">原始资料：<a href=\"https://docs.oracle.com/en/java/javase/21/language/records.html\">Java 21 Record Classes</a>。</p>"
+      },
+      {
+        "title": "不存在和失败不是同一回事",
+        "html": "<p>Optional 表达“成功查询但可能没有结果”，例如按任务 ID 查找。数据库连接异常则表示查询没有正常完成，不应伪装成 Optional.empty。调用端可用 map 转换存在的值，用 orElseGet 延迟提供默认值，用 orElseThrow 把不存在转换为明确业务异常。直接 get() 又不检查存在性，会把本来清晰的分支变成运行时意外。</p><p>Optional 更适合作为返回类型，不必把每个实体字段和方法参数都包进去。默认值计算昂贵时，orElse 的参数在方法调用前已求值，即使结果存在也会执行；orElseGet 的供应函数才是按需调用。这样的求值差异在涉及数据库、日志或外部请求时尤其重要。</p><p class=\"source-note\">原始资料：<a href=\"https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/Optional.html\">Java 21 Optional API</a>。</p>"
+      },
+      {
+        "title": "异常携带失败原因，不能吞掉",
+        "html": "<p>受检异常要求调用者捕获或继续声明；RuntimeException 不强制处理，但同样应该有明确语义。业务层可抛出 TaskNotFound 这类异常，HTTP 层再转成 404。不要在每层 catch Exception 后返回 null，这会让真正的错误更晚发生，并抹掉诊断线索。</p><p>本课在 jshell 中独立运行，不需要 Spring。把每一步结果先写下来再执行，强迫自己从引用、复制和控制流推导行为。结束时关掉代码，解释为什么 List.copyOf 保护的是集合结构，为什么列表元素若仍然可变就还需要额外处理；能够给出反例才说明你理解了边界。</p><pre><code>Optional&lt;String&gt; title = Optional.of(&quot;学习&quot;);\nSystem.out.println(title.map(String::length).orElse(0));\nSystem.out.println(Optional.&lt;String&gt;empty().orElseGet(() -&gt; &quot;未命名&quot;));\n// /exit 退出 jshell</code></pre><p>还应区分引用比较与内容比较。两个组件相同的record通常equals为true，但用双等号比较的是对象引用，不能表达业务值相等。把任务标题作为Map键时，字符串内容比较与正确的equals/hashCode共同影响查询结果；这也是理解值对象比只记语法更有用的原因。</p><p class=\"source-note\">原始资料：<a href=\"https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/Optional.html\">Java 21 Optional API</a>。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "Optional.empty 最适合表达什么？",
+      "options": [
+        "数据库连接失败",
+        "请求线程已崩溃",
+        "查询正常但无值"
+      ],
+      "answer": 2,
+      "explanation": "不存在是成功结果的一种；基础设施失败应传播为错误，不能隐藏成空值。"
+    },
+    "exercise": {
+      "task": "在 jshell 中验证集合复制和 Optional。",
+      "steps": [
+        "运行 jshell，逐行粘贴 TaskView 示例。",
+        "追加 tags 后观察 view.tags()；尝试 view.tags().add(\"x\")。",
+        "把 List.copyOf 删除后重新定义另一个 record，对比可变集合影响。"
+      ],
+      "expected": "复制版本只含 spring，修改其 tags 抛 UnsupportedOperationException；未复制版本受原列表修改影响。",
+      "solution": "title.map(String::length).orElse(0) 得到 2；空 Optional 的默认值是“未命名”。record 的 final 只阻止组件引用被重新赋值，无法自动冻结组件引用指向的对象。"
+    },
+    "sources": [
+      {
+        "title": "Java 21 Record Classes",
+        "url": "https://docs.oracle.com/en/java/javase/21/language/records.html"
+      },
+      {
+        "title": "Java 21 Optional API",
+        "url": "https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/Optional.html"
+      }
+    ],
+    "lab": "独立 jshell 实验"
+  },
+  {
+    "id": 4,
+    "slug": "maven-bom",
+    "title": "读懂 Maven 与依赖管理",
+    "phase": "01 · 基础与 Spring 核心",
+    "minutes": 25,
+    "prerequisites": [
+      "03"
+    ],
+    "goal": "从 pom 和依赖树解释一个类为何出现在运行时。",
+    "bridge": "package.json 告诉你项目依赖什么；pom 还描述编译、测试、打包及依赖版本管理。BOM 接近一组经过协调的版本约束。",
+    "sections": [
+      {
+        "title": "依赖坐标与生命周期",
+        "html": "<p>Maven 用 groupId、artifactId、version 定位构件，依赖又会带入传递依赖。你只声明 Web MVC starter，项目中仍会出现 Spring MVC、JSON 库和容器，这是正常的依赖图展开。compile 范围面向编译与运行，test 范围用于测试，runtime 范围常用于 JDBC 驱动等运行时组件；把测试库放进生产 classpath 会增加体积和攻击面。</p><p>clean、test、package、verify 不是任意脚本名。它们属于构建生命周期，调用后面的阶段会经过前面的必要阶段；verify 是否执行集成测试，取决于项目插件配置，不能只凭名称推断覆盖面。定位构建失败时先看出错阶段，再看第一个有因果意义的错误。</p><p class=\"source-note\">原始资料：<a href=\"https://maven.apache.org/guides/introduction/introduction-to-dependency-mechanism.html\">Maven 依赖机制</a>。</p>"
+      },
+      {
+        "title": "BOM 管版本，不自动添加依赖",
+        "html": "<p>Boot 的 parent 带来依赖与插件管理；企业已有 parent 时，可以改为导入 Boot BOM，但插件管理要另行配置。dependencyManagement 定义依赖版本规则，不会把所有管理条目都装进项目。只有 dependencies 或传递依赖真正引用时才进入依赖图。不要看到某库受 Boot 管理，就以为它已经可用。</p><p>直接指定底层 Spring、Jackson 或 Hibernate 的版本可能打破整套兼容关系。确需安全修复或功能升级时，记录为何覆盖、覆盖了哪条依赖链，并运行验证。两个依赖要求不同版本时，应先用依赖树找来源，不能通过反复加版本号“消除红线”。</p><pre><code>./mvnw -f examples/hello-api/pom.xml dependency:tree\n./mvnw -f examples/hello-api/pom.xml help:effective-pom\n./mvnw -f examples/hello-api/pom.xml dependency:tree '-Dincludes=org.springframework:*'\n# 理解版本管理：下面仅是 POM 片段，不要求重复添加\n# &lt;properties&gt;&lt;java.version&gt;21&lt;/java.version&gt;&lt;/properties&gt;</code></pre><p class=\"source-note\">原始资料：<a href=\"https://github.com/spring-projects/spring-boot/wiki/Spring-Boot-4.0-Migration-Guide\">Boot 4 官方迁移指南</a>。</p>"
+      },
+      {
+        "title": "Boot 4 的模块化需要读当前文档",
+        "html": "<p>本课程 MVC 使用 spring-boot-starter-webmvc；相应测试功能可使用 spring-boot-starter-webmvc-test。Boot 4 将多个自动配置和测试功能拆成更明确的模块，因此旧教程的 starter 和 import 不能只靠名称猜测。若一个测试注解导入失败，先确认测试模块是否添加以及包名是否迁移。</p><p>构建输出里一个依赖的版本号不等于它的生产使用情况：它可能只在测试范围、被冲突选择淘汰，或者属于插件依赖。把源代码 import、pom 声明、最终依赖树三者对应起来，才算真正找到来源。练习中不需要升级任何库，只练习解释当前项目为何能够编译。</p><p>Maven的传递依赖选择也不等同于npm把不同版本放进嵌套目录。Java运行时常要在同一classpath上使用选中的类定义，二进制方法签名不匹配会出现NoSuchMethodError等问题。遇到运行期缺方法，既要查编译时依赖，也要查实际运行产物中的版本。</p><p class=\"source-note\">原始资料：<a href=\"https://github.com/spring-projects/spring-boot/wiki/Spring-Boot-4.0-Migration-Guide\">Boot 4 官方迁移指南</a>。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "只在 dependencyManagement 中写入某库会怎样？",
+      "options": [
+        "只提供版本规则",
+        "自动加载所有类",
+        "立即启动新服务"
+      ],
+      "answer": 0,
+      "explanation": "管理条目不等于实际依赖声明，仍需 dependencies 或传递依赖引用。"
+    },
+    "exercise": {
+      "task": "解释 hello-api 中任意一个 Spring 类的依赖来源。",
+      "steps": [
+        "执行 dependency:tree，找到 spring-webmvc 及其上游。",
+        "执行 effective-pom，搜索 java.version 与 Boot parent。",
+        "记录一个测试依赖及其 scope，不修改版本。"
+      ],
+      "expected": "能够给出 starter→具体模块的依赖路径，并区分测试范围。",
+      "solution": "示例解释：Controller 注解来自 Spring Web，Web MVC starter 引入相关模块；JUnit 来自测试依赖链。若树中显示 omitted for conflict，实际选中版本以未被省略的对应节点为准。"
+    },
+    "sources": [
+      {
+        "title": "Maven 依赖机制",
+        "url": "https://maven.apache.org/guides/introduction/introduction-to-dependency-mechanism.html"
+      },
+      {
+        "title": "Boot 4 官方迁移指南",
+        "url": "https://github.com/spring-projects/spring-boot/wiki/Spring-Boot-4.0-Migration-Guide"
+      }
+    ],
+    "lab": "examples/hello-api"
+  },
+  {
+    "id": 5,
+    "slug": "constructor-injection",
+    "title": "用构造注入理解 IoC",
+    "phase": "01 · 基础与 Spring 核心",
+    "minutes": 25,
+    "prerequisites": [
+      "04"
+    ],
+    "goal": "解释对象由谁创建，并写出不依赖 Spring 容器的业务测试。",
+    "bridge": "前端组件通过 props 接收依赖；后端业务对象也应明确声明所需协作者，而不是在方法中到处 new。",
+    "sections": [
+      {
+        "title": "把创建对象的责任移出业务",
+        "html": "<p>控制反转的实际含义很具体：业务类声明自己需要什么，容器负责把对象组装好。创建任务的服务需要一个存储接口，却不应该在每次调用时自行创建数据库连接。构造注入把这个要求变成对象存在的前提；没有依赖就无法构造，减少“对象已创建但还没初始化”的中间状态。</p><p>Spring 的 Bean 是容器管理的对象，不是看到 new 就自动接管。你在测试中 new 一个服务完全合理，只需提供依赖；但自己 new 一个标有事务注解的服务，不会自动获得容器代理。这一区别将贯穿缓存、事务和异步课程，先把普通 Java 对象与容器增强对象分开理解。</p><p class=\"source-note\">原始资料：<a href=\"https://docs.spring.io/spring-framework/reference/core/beans/annotation-config/autowired.html\">Spring 构造器自动注入</a>。</p>"
+      },
+      {
+        "title": "用极小对象图验证理解",
+        "html": "<p>下面是独立 Java 教学代码，可以直接放进 jshell。接口隔离的是“存储任务”能力，而不是为了接口数量本身。业务服务只维护标题规则；内存替身用于观察调用。换成真实存储时，业务规则无需知道连接字符串或 SQL。给每个类都机械地创建同名接口，并不会自动获得良好设计。</p><p>迁入 Spring 后，服务可标记 @Service，存储实现可标记 @Repository，只有一个构造器时不需要额外写 @Autowired。若同类型存在多个候选 Bean，容器需要 @Qualifier 或 @Primary 等明确选择。不要用随机改 Bean 名字解决歧义，先画出你真正想注入的对象关系。</p><pre><code>interface TaskStore { void save(String title); }\nclass CreateTask {\n  private final TaskStore store;\n  CreateTask(TaskStore store) { this.store = store; }\n  void create(String title) {\n    if (title.isBlank()) throw new IllegalArgumentException(&quot;blank&quot;);\n    store.save(title);\n  }\n}\nvar saved = new java.util.ArrayList&lt;String&gt;();\nvar service = new CreateTask(saved::add);\nservice.create(&quot;学习注入&quot;);\nSystem.out.println(saved);</code></pre><p class=\"source-note\">原始资料：<a href=\"https://docs.spring.io/spring-framework/reference/core/beans/java/bean-annotation.html\">Spring @Bean 依赖声明</a>。</p>"
+      },
+      {
+        "title": "依赖方向比注解数量更重要",
+        "html": "<p>控制器负责 HTTP 参数和响应，服务负责用例，存储负责数据访问。依赖通常从外部入口流向业务和数据接口，避免控制器互相调用或仓库去寻找 HTTP 请求。这样测试服务无需起端口，未来换数据库也不会迫使每个控制器重写。</p><p>常见陷阱是字段注入后在普通单元测试里直接 new，导致依赖为 null；另一个是循环依赖，A 构造需要 B，而 B 构造又需要 A。循环通常说明职责没分清，优先抽出共同协作或重新确定用例边界。不要先靠延迟加载隐藏它。本课交付物不是注解清单，而是一张能解释创建顺序的对象图。</p><p>好的构造器依赖应少而明确。如果一个服务要接收十几个不相关协作者，先审查它是否承担过多用例；把依赖藏进一个全局容器查询器只会把问题变得不可见。测试替身应模拟具体边界，不必复制真实数据库的全部功能。</p><p class=\"source-note\">原始资料：<a href=\"https://docs.spring.io/spring-framework/reference/core/beans/java/bean-annotation.html\">Spring @Bean 依赖声明</a>。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "构造注入主要让哪件事显式化？",
+      "options": [
+        "请求最终状态",
+        "对象所需依赖",
+        "数据库索引数"
+      ],
+      "answer": 1,
+      "explanation": "构造器让必需依赖在类型与创建时可见，并允许测试直接传入替身。"
+    },
+    "exercise": {
+      "task": "在 jshell 运行对象图，然后用替身验证拒绝空标题。",
+      "steps": [
+        "执行本课代码，确认 saved 有一条。",
+        "执行 service.create(\" \") 并观察异常。",
+        "再查看 saved.size()，判断错误输入是否触发存储。"
+      ],
+      "expected": "有效标题被保存；空白标题抛异常；列表仍只有一条。",
+      "solution": "saved.size() 应为 1。服务在调用 store.save 之前拒绝空白标题。Spring 版本的唯一区别是把 CreateTask/实现注册为 Bean，由容器调用构造器；业务逻辑本身无需依赖容器 API。"
+    },
+    "sources": [
+      {
+        "title": "Spring 构造器自动注入",
+        "url": "https://docs.spring.io/spring-framework/reference/core/beans/annotation-config/autowired.html"
+      },
+      {
+        "title": "Spring @Bean 依赖声明",
+        "url": "https://docs.spring.io/spring-framework/reference/core/beans/java/bean-annotation.html"
+      }
+    ],
+    "lab": "独立 jshell 实验"
+  },
+  {
+    "id": 6,
+    "slug": "singleton-lifecycle",
+    "title": "单例 Bean 与并发请求",
+    "phase": "01 · 基础与 Spring 核心",
+    "minutes": 25,
+    "prerequisites": [
+      "05"
+    ],
+    "goal": "发现共享可变字段造成的数据串扰，并理解初始化与销毁。",
+    "bridge": "浏览器里的组件实例常按页面创建；Spring 默认单例 Bean 通常由很多请求共享，不能把它当成每个用户一份的对象。",
+    "sections": [
+      {
+        "title": "单例限定在容器和 Bean 定义内",
+        "html": "<p>Spring 默认 singleton 是某个容器中某个 Bean 定义的一份实例，不是整个世界只能有一个 Java 对象，也不代表不同应用实例共享内存。应用扩容为三个进程时，每个进程都有自己的服务 Bean。prototype 每次向容器取对象可创建新实例，但把它注入单例时，默认并不会在每个方法调用自动重新获取。</p><p>单例服务最容易出错的写法是把 currentUser、lastRequest、临时集合放到成员字段。请求甲刚赋值，请求乙就可能覆盖；甲的后续逻辑读取到乙的数据。方法内局部变量属于本次调用，而共享字段需要明确并发策略。final 只固定引用，不保证其指向对象的内部修改安全。</p><p class=\"source-note\">原始资料：<a href=\"https://docs.spring.io/spring-framework/reference/core/beans/factory-scopes.html\">Spring Bean Scopes</a>。</p>"
+      },
+      {
+        "title": "原子操作不是一切业务规则的原子性",
+        "html": "<p>计数器 count++ 包含读取、加一、写回，并非一个不可分割动作。AtomicInteger 可保证单次增量原子，但它无法自动保护“读取余额、检查、扣减、写入”这样的跨步骤业务不变量。ConcurrentHashMap 也只保证其规定的操作语义，先 containsKey 再 put 仍是两个操作；要选用 putIfAbsent 或计算方法表达整体意图。</p><p>下面使用并行流制造共享访问，输出不安全计数可能偶尔碰巧正确，这不能证明安全。观察到一次丢失更新就足够证伪。生产业务计数若需要跨多个进程一致性，还必须放到数据库或其他共享系统，而不是给 JVM 字段加锁就结束。</p><pre><code>import java.util.concurrent.atomic.*;\nimport java.util.stream.*;\nvar unsafe = new int[]{0};\nIntStream.range(0, 100000).parallel().forEach(i -&gt; unsafe[0]++);\nSystem.out.println(unsafe[0]);\nvar safe = new AtomicInteger();\nIntStream.range(0, 100000).parallel().forEach(i -&gt; safe.incrementAndGet());\nSystem.out.println(safe.get());</code></pre><p class=\"source-note\">原始资料：<a href=\"https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/atomic/AtomicInteger.html\">Java AtomicInteger</a>。</p>"
+      },
+      {
+        "title": "生命周期只做相应阶段的事",
+        "html": "<p>构造器用于建立对象有效状态；依赖组装后可以通过 Jakarta 的 @PostConstruct 完成轻量初始化，销毁时用 @PreDestroy 释放自己拥有的资源。不要把漫长远程调用或永久循环塞进初始化，这会让应用迟迟无法就绪。某些被容器管理的资源已经有关闭机制，重复关闭也会制造错误。</p><p>初始化阶段不能随意假设事务、缓存等代理调用已经按你想象工作；尤其自身方法调用不会自然经过外部代理。需要启动任务时选择明确的启动扩展点，并考虑失败如何反馈。练习结束后应能回答：这个对象谁拥有，哪些字段共享，失败时谁负责清理，扩容后哪些数据会分裂成多份。</p><p class=\"source-note\">原始资料：<a href=\"https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/atomic/AtomicInteger.html\">Java AtomicInteger</a>。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "哪个位置适合放本次请求的临时用户名？",
+      "options": [
+        "服务共享字段",
+        "静态全局字段",
+        "方法局部变量"
+      ],
+      "answer": 2,
+      "explanation": "单例和静态字段会被多个请求共享，局部变量更符合一次调用的数据生命周期。"
+    },
+    "exercise": {
+      "task": "验证丢失更新，再审查项目服务中的成员字段。",
+      "steps": [
+        "在 jshell 运行两种计数器，多执行几次。",
+        "检查 hello-api 服务字段，区分基础设施依赖与业务可变状态。",
+        "为每个共享集合写出它采用的并发控制方式。"
+      ],
+      "expected": "AtomicInteger 总是输出 100000；普通数组计数不能提供该保证。",
+      "solution": "若普通计数偶然也是100000，增大迭代数或重复执行，不能据此宣称线程安全。共享存储需要并发容器和正确的原子方法；当前用户、请求参数应沿方法参数传递。"
+    },
+    "sources": [
+      {
+        "title": "Spring Bean Scopes",
+        "url": "https://docs.spring.io/spring-framework/reference/core/beans/factory-scopes.html"
+      },
+      {
+        "title": "Java AtomicInteger",
+        "url": "https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/atomic/AtomicInteger.html"
+      }
+    ],
+    "lab": "独立 jshell 实验；examples/hello-api"
+  },
+  {
+    "id": 7,
+    "slug": "auto-configuration",
+    "title": "拆开 Spring Boot 自动配置",
+    "phase": "01 · 基础与 Spring 核心",
+    "minutes": 25,
+    "prerequisites": [
+      "06"
+    ],
+    "goal": "用条件报告解释一个自动配置为何生效或未生效。",
+    "bridge": "自动配置类似框架根据已安装插件和配置组装运行环境，但它有可查看的条件，不是无法理解的黑盒。",
+    "sections": [
+      {
+        "title": "从启动入口到条件装配",
+        "html": "<p>@SpringBootApplication 集成配置声明、自动配置启用和组件扫描等常用能力。你自己的控制器通常通过组件扫描进入容器，框架提供的基础设施则可能来自自动配置。两条路径相关却不相同：包扫描范围错误可能导致控制器不见了，而排除某个自动配置通常不会替你找到业务类。</p><p>自动配置会观察 classpath、已有 Bean、配置属性等条件。例如存在数据库依赖不代表连接地址一定正确；存在某个类也不代表所有自动配置都会启用。一个常用原则是用户明确提供 Bean 后，相关默认实现可能退让，但具体哪些条件退让必须读对应配置，不能概括成所有自定义 Bean 都能替代全部默认设置。</p><p class=\"source-note\">原始资料：<a href=\"https://docs.spring.io/spring-boot/reference/using/auto-configuration.html\">Spring Boot 自动配置</a>。</p>"
+      },
+      {
+        "title": "用条件报告建立证据",
+        "html": "<p>给应用传入 --debug 可以看到条件评估报告。报告中的 positive matches 表示条件匹配，negative matches 表示某项条件没满足。后者大量存在是正常的：你的 MVC 服务本来就不需要所有消息队列和响应式数据库配置。目标不是把所有项目变成 positive，而是找出与你遇到的问题直接相关的条目。</p><p>下面仍启动现有 hello-api，不需要增加代码。首先从 pom 确认使用 MVC starter，然后在报告中查找 MVC 和 WebServer 相关条目。把一个条件的输入和结果记录下来，你就能从“Boot 大概帮我做了”变为“因为某类存在且缺少自定义 Bean，所以默认方案建立”。</p><pre><code>./mvnw -f examples/hello-api/pom.xml spring-boot:run \\\n  -Dspring-boot.run.arguments=--debug\n# 第二个终端验证服务仍能处理请求\ncurl -i http://localhost:8081/api/tasks</code></pre><p class=\"source-note\">原始资料：<a href=\"https://docs.spring.io/spring-boot/reference/using/using-the-springbootapplication-annotation.html\">Spring Boot 主应用类</a>。</p>"
+      },
+      {
+        "title": "自定义时缩小改动范围",
+        "html": "<p>想调整端口应先找配置属性，而不是重写服务器工厂；想增加 MVC 拦截器可寻找对应扩展接口，而不是复制整套 MVC 配置。过早使用 @EnableWebMvc 可能改变 Boot 的默认装配方式，导致原有行为消失。排除自动配置也应有明确原因和验证，不把它当成通用消错按钮。</p><p>常见陷阱是把启动类放在业务包的下层，导致同级包不在默认扫描范围；另一个是手动构建 JSON mapper 后漏掉框架模块。Boot 4 使用 Jackson 3，主映射器与定制接口都应看当前文档。保留最小复现：一次只改一个条件，用启动报告和 API 响应验证因果，再决定是否保留变更。</p><p class=\"source-note\">原始资料：<a href=\"https://docs.spring.io/spring-boot/reference/using/using-the-springbootapplication-annotation.html\">Spring Boot 主应用类</a>。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "条件报告里大量 negative matches 表示什么？",
+      "options": [
+        "很多能力未启用",
+        "整个程序已损坏",
+        "全部依赖都缺失"
+      ],
+      "answer": 0,
+      "explanation": "很多自动配置本来就不适用于当前应用。必须结合相关条件判断，不能只数 negative 项。"
+    },
+    "exercise": {
+      "task": "解释 hello-api 中一个自动配置的命中条件。",
+      "steps": [
+        "以 --debug 启动 hello-api。",
+        "找到一个 MVC 或容器相关 positive 条目和一个不相关 negative 条目。",
+        "写下每个条目的条件输入，并确认 GET /api/tasks 仍返回200。"
+      ],
+      "expected": "至少解释一项命中、一项未命中，同时证明服务正常。",
+      "solution": "答案应包含因果而非复制名称，例如“当前为Servlet Web应用、相关类在classpath，因此MVC配置候选命中；缺少某消息中间件类，对应配置未启用”。具体类名以本次报告为准。"
+    },
+    "sources": [
+      {
+        "title": "Spring Boot 自动配置",
+        "url": "https://docs.spring.io/spring-boot/reference/using/auto-configuration.html"
+      },
+      {
+        "title": "Spring Boot 主应用类",
+        "url": "https://docs.spring.io/spring-boot/reference/using/using-the-springbootapplication-annotation.html"
+      }
+    ],
+    "lab": "examples/hello-api"
+  },
+  {
+    "id": 8,
+    "slug": "configuration",
+    "title": "配置、Profile 与密钥边界",
+    "phase": "01 · 基础与 Spring 核心",
+    "minutes": 25,
+    "prerequisites": [
+      "07"
+    ],
+    "goal": "预测配置覆盖结果，并避免将环境差异写进业务代码。",
+    "bridge": "前端构建变量常在打包时固化；后端可让同一构件在启动时接收不同环境配置。",
+    "sections": [
+      {
+        "title": "同一构件，多种运行环境",
+        "html": "<p>端口、数据库地址、超时和功能开关不应该散落在业务代码里。Boot 支持 properties、YAML、环境变量和命令行参数等配置来源。常用场景下，命令行可以覆盖环境变量，环境变量可以覆盖打包配置；测试注解等还有更高优先级来源，因此完整排查必须看实际来源而非记住一句“环境变量最大”。</p><p>Profile 是按环境或运行模式选择配置集合的机制，不是隔离安全域的万能工具。本项目 task-service 的默认模式使用本地 H2，postgres 模式使用 PostgreSQL，infra 模式再启用 Redis/Kafka。开启 profile 本身不会帮你启动外部服务，依赖不可达时仍需按连接错误处理。</p><p class=\"source-note\">原始资料：<a href=\"https://docs.spring.io/spring-boot/reference/features/external-config.html\">Spring Boot 外部配置</a>。</p>"
+      },
+      {
+        "title": "通过端口实验理解覆盖",
+        "html": "<p>先保持源码中的默认端口不变，用环境变量启动为 8181，再同时传入命令行 8282，观察最终监听地址。预期由命令行获胜。配置对错应通过日志和真实端口访问验证，而不是只看文件内容。若项目已有进程，先正常停止，避免把旧进程响应误认为新配置生效。</p><p>结构化业务配置优先使用 @ConfigurationProperties 绑定到有明确类型的对象，再结合校验及时拒绝负数超时或空地址。不要把所有配置都读成字符串后到处手动解析。零散 @Value 可用于小范围值，但成组配置需要可发现的前缀、默认值和边界条件。</p><pre><code>SERVER_PORT=8181 ./mvnw -f examples/hello-api/pom.xml spring-boot:run \\\n  -Dspring-boot.run.arguments=--server.port=8282\n# 在另一终端；预期只在最终选定端口成功\ncurl -i http://localhost:8282/api/tasks\n# 停止后正常启动，恢复源码配置\n./mvnw -f examples/hello-api/pom.xml spring-boot:run</code></pre><p class=\"source-note\">原始资料：<a href=\"https://docs.spring.io/spring-boot/reference/features/profiles.html\">Spring Boot Profiles</a>。</p>"
+      },
+      {
+        "title": "配置也需要变更和安全管理",
+        "html": "<p>密钥不能提交进 Git，示例账号和本地容器密码只服务学习环境。部署时由受控秘密管理机制注入，并限制日志、诊断端点和进程信息暴露。把密钥写到一个名为 application-prod.properties 的文件，不会因为名称含 prod 就变安全；把文件加入 gitignore 也无法抹掉它曾经进入历史的事实。</p><p>配置变化应有审查、回滚和观测。例如将连接池增大十倍可能耗尽数据库连接，不是单纯“更快”。属性拼错时可能静默不生效，所以要检查绑定对象和运行结果。完成练习后在记录中写清来源、预期值、实际值，逐渐建立“配置是系统行为的一部分”的意识。</p><p class=\"source-note\">原始资料：<a href=\"https://docs.spring.io/spring-boot/reference/features/profiles.html\">Spring Boot Profiles</a>。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "本课同时设置环境端口和命令行端口，谁优先？",
+      "options": [
+        "源码默认配置",
+        "命令行的配置",
+        "环境变量配置"
+      ],
+      "answer": 1,
+      "explanation": "在本课普通启动条件下，命令行属性覆盖环境变量与文件配置；测试等特殊来源需另查完整优先级。"
+    },
+    "exercise": {
+      "task": "验证端口覆盖并还原运行环境。",
+      "steps": [
+        "停止旧 hello-api，执行同时包含8181和8282的启动命令。",
+        "请求8282，观察启动日志；确认8181没有这次服务监听。",
+        "Ctrl+C后使用普通命令重启，确认8081恢复。"
+      ],
+      "expected": "临时启动为8282，普通启动恢复8081，源码不需要修改。",
+      "solution": "SERVER_PORT 是环境变量映射；--server.port 是Boot命令行属性。本次优先级为命令行8282 > 环境变量8181 > 文件8081。不要把 shell 的赋值误写为永久修改系统环境。"
+    },
+    "sources": [
+      {
+        "title": "Spring Boot 外部配置",
+        "url": "https://docs.spring.io/spring-boot/reference/features/external-config.html"
+      },
+      {
+        "title": "Spring Boot Profiles",
+        "url": "https://docs.spring.io/spring-boot/reference/features/profiles.html"
+      }
+    ],
+    "lab": "examples/hello-api"
+  },
+  {
+    "id": 9,
+    "slug": "rest-resources",
+    "title": "把 REST 设计成资源合同",
+    "phase": "02 · HTTP 与可测试 API",
+    "minutes": 30,
+    "prerequisites": [
+      "08"
+    ],
+    "goal": "为任务创建、查询和状态变化选择稳定的 HTTP 语义。",
+    "bridge": "前端关心请求怎么调用；全栈工程师还要定义重试、安全性、缓存和错误的合同。",
+    "sections": [
+      {
+        "title": "资源与表示先于注解",
+        "html": "<p>任务是资源，/api/tasks 表示集合，/api/tasks/{id} 表示单个任务。HTTP 返回的 JSON 是资源的一种表示，不应直接等于数据库表的所有字段。控制器映射负责把 method 与 path 连接到用例；业务规则仍应该留在服务层。路径名称一致比给每个动作设计一个随意缩写更容易维护。</p><p>GET 用于读取，调用者可以合理期待它不会执行可观察的业务修改。POST 常用于创建或提交命令；成功创建可返回 201 和 Location。PUT 表达指定资源的替换语义，PATCH 表达部分修改；它们的具体字段语义需写进合同。DELETE 的幂等性描述重复请求的目标状态，而不是要求每次状态码完全一样。</p><p class=\"source-note\">原始资料：<a href=\"https://www.rfc-editor.org/rfc/rfc9110.html\">HTTP 方法与状态码 RFC 9110</a>。</p>"
+      },
+      {
+        "title": "幂等性与表单按钮无关",
+        "html": "<p>请求可在浏览器重试、代理重试或用户重新打开页面时重复。PUT 通常应设计成相同输入达到相同目标状态；POST 创建不能仅靠前端禁用按钮保证不重复。状态更新也需区分“设置为DONE”和“完成数加一”，前者容易做成幂等操作，后者天然需要额外去重或条件控制。</p><p>返回成功前应决定任务是否已经持久化、是否只是被接收。202 表达已接受但尚未完成，不适合伪装已经完成的业务。201 的 Location 应指向新资源，客户端可据此查询。为了保持教学简单，本课先观察已有 hello-api 的创建和查询；异步任务、幂等键与并发版本将在后续课程继续完善。</p><pre><code>curl -i -X POST http://localhost:8081/api/tasks \\\n  -H &quot;Content-Type: application/json&quot; \\\n  --data &#x27;{&quot;title&quot;:&quot;定义资源合同&quot;}&#x27;\n# 从响应复制实际 id，替换下面的占位文本\ncurl -i http://localhost:8081/api/tasks/实际ID</code></pre><p class=\"source-note\">原始资料：<a href=\"https://docs.spring.io/spring-framework/reference/web/webmvc/mvc-controller/ann-requestmapping.html\">Spring MVC 请求映射</a>。</p>"
+      },
+      {
+        "title": "状态码是可编程接口的一部分",
+        "html": "<p>400 用于无法接受的请求，401 表示缺少或无效认证，403 表示无权执行，404 表示资源不存在，409 可表达当前资源状态造成的冲突。不要把所有错误包成 HTTP 200 再让前端猜 success 字段，这会削弱代理、监控、SDK 和重试策略的共同语义。相反，业务错误也不应全部变成500。</p><p>常见陷阱是接口返回数据库实体，后来加了内部备注或权限字段，字段就被意外公开。使用响应 DTO 明确允许暴露的字段，日期格式、分页结构和错误结构也要稳定。练习的真正产物是一段可被前后端共同检查的合同：请求、成功响应、失败响应、重复调用后果各写清一项。</p><p class=\"source-note\">原始资料：<a href=\"https://docs.spring.io/spring-framework/reference/web/webmvc/mvc-controller/ann-requestmapping.html\">Spring MVC 请求映射</a>。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "HTTP 幂等性描述的是什么？",
+      "options": [
+        "每次耗时都相等",
+        "每次状态码相同",
+        "重复请求的效果"
+      ],
+      "answer": 2,
+      "explanation": "幂等性关注重复执行对目标资源的预期效果，不能由响应文本或耗时是否相同判断。"
+    },
+    "exercise": {
+      "task": "建立一条任务并写出它的最小 API 合同。",
+      "steps": [
+        "启动 hello-api，POST title，记录状态码、Location与返回id。",
+        "使用真实id执行GET，确认标题与创建一致。",
+        "设计“设置任务完成”和“完成数加一”的重复请求结果。"
+      ],
+      "expected": "创建后能按实际id查询；能解释两个操作为何具有不同的重复执行风险。",
+      "solution": "合同例：POST /api/tasks 接收非空title，成功201并返回新资源；GET已存在id返回200，缺失返回404。设置DONE重复执行目标仍DONE；加一重复执行会再次增加，因此需要幂等键或条件更新。"
+    },
+    "sources": [
+      {
+        "title": "HTTP 方法与状态码 RFC 9110",
+        "url": "https://www.rfc-editor.org/rfc/rfc9110.html"
+      },
+      {
+        "title": "Spring MVC 请求映射",
+        "url": "https://docs.spring.io/spring-framework/reference/web/webmvc/mvc-controller/ann-requestmapping.html"
+      }
+    ],
+    "lab": "examples/hello-api"
+  },
+  {
+    "id": 10,
+    "slug": "dto-validation",
+    "title": "DTO 校验与可信边界",
+    "phase": "02 · HTTP 与可测试 API",
+    "minutes": 30,
+    "prerequisites": [
+      "09"
+    ],
+    "goal": "分开结构校验、业务校验和数据库约束。",
+    "bridge": "TypeScript类型不阻止恶意HTTP输入；服务器必须按自己的规则重新解析与验证。",
+    "sections": [
+      {
+        "title": "三个边界各自负责什么",
+        "html": "<p>JSON 解析先检查输入能否转换为 Java 类型；Bean Validation 再检查字段是否满足约束；服务层检查跨字段与当前业务状态；数据库最终维护唯一性和引用完整性。这几层不是重复劳动。例如标题为空可在入口立即拒绝，而“同一用户不能创建重复项目名”需要数据库唯一约束抵御并发，单纯先查询再插入并不可靠。</p><p>请求 DTO 明确允许客户端提交的字段。客户端不能通过额外发送 ownerId 或 admin 字段夺取权限，服务必须从已认证身份得出操作者。响应 DTO 则控制返回内容。若直接用实体接收表单，模型中后来新增的字段可能被自动绑定，造成超出预期的修改范围。</p><p class=\"source-note\">原始资料：<a href=\"https://docs.spring.io/spring-framework/reference/web/webmvc/mvc-controller/ann-validation.html\">Spring MVC Validation</a>。</p>"
+      },
+      {
+        "title": "声明规则，同时验证规则会执行",
+        "html": "<p>Boot 4 示例使用 jakarta.validation 包，并显式引入 validation starter。@NotBlank 同时拒绝 null、空字符串和只有空白的字符串；@Size 约束长度，但通常不会单独拒绝 null，所以不能把它当作必填。嵌套对象需要级联校验的 @Valid。仅在 record 上写注解不会让每个 new 都自动抛错，校验必须由MVC或显式Validator触发。</p><p>下面是教学 DTO，演示规则组合，不要求覆盖项目现有类型。控制器的 @Valid @RequestBody 告诉 MVC 在参数绑定后触发校验。字段长度的技术定义和产品对字数的理解可能不同，尤其面对emoji；产品要求复杂时需定义自定义规则和相应测试，而不是假定字符数等于用户感知字数。</p><pre><code>import jakarta.validation.Valid;\nimport jakarta.validation.constraints.NotBlank;\nimport jakarta.validation.constraints.Size;\n\nrecord CreateTaskRequest(\n    @NotBlank @Size(max = 120) String title) {}\n\n// 教学控制器方法签名：实现仍调用业务服务\n// create(@Valid @RequestBody CreateTaskRequest request)</code></pre><p class=\"source-note\">原始资料：<a href=\"https://jakarta.ee/specifications/bean-validation/\">Jakarta Bean Validation</a>。</p>"
+      },
+      {
+        "title": "失败反馈必须可以修正",
+        "html": "<p>校验错误应指向可操作字段与稳定的错误代码，让前端能提示用户修正。不要把完整请求体或密码写入错误日志。服务层不能因为MVC已经校验就放弃关键不变量，因为同一用例也可能被消息消费者、定时任务或其他内部入口调用。</p><p>最常见的假成功是只测合法输入。至少测试空字段、空白字段、边界长度、超出长度、类型不匹配和无效JSON。它们可能走不同异常处理路径，因此同样是400也要保持可理解的响应。请求不合法时数据库和内存状态都应不变，验证失败只返回400却已经保存数据，仍然是错误实现。</p><pre><code>curl -i -X POST http://localhost:8081/api/tasks \\\n  -H &quot;Content-Type: application/json&quot; --data &#x27;{&quot;title&quot;:&quot; &quot;}&#x27;\ncurl -i -X POST http://localhost:8081/api/tasks \\\n  -H &quot;Content-Type: application/json&quot; --data &#x27;{}&#x27;\ncurl -i -X POST http://localhost:8081/api/tasks \\\n  -H &quot;Content-Type: application/json&quot; --data &#x27;{&quot;title&quot;:&#x27;</code></pre><p class=\"source-note\">原始资料：<a href=\"https://jakarta.ee/specifications/bean-validation/\">Jakarta Bean Validation</a>。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "只写 @Size 能否确保字段必填？",
+      "options": [
+        "仍需非空约束",
+        "已经强制必填",
+        "自动填入默认"
+      ],
+      "answer": 0,
+      "explanation": "长度约束通常允许null；必填需要NotNull、NotBlank等符合字段语义的约束。"
+    },
+    "exercise": {
+      "task": "证明坏输入不会改变服务状态。",
+      "steps": [
+        "先GET任务列表，记录数量。",
+        "逐个执行本课三个坏请求，记录返回状态和字段信息。",
+        "再次GET，确认数量没增加；合法title应能正常创建。"
+      ],
+      "expected": "坏请求返回4xx且无任务新增；合法请求成功。",
+      "solution": "空白和缺少title应被必填规则拒绝，无效JSON在解析阶段失败。两个阶段都不应调用保存逻辑。若坏请求竟成功，检查validation starter、@Valid位置及字段注解，而不是只改前端校验。"
+    },
+    "sources": [
+      {
+        "title": "Spring MVC Validation",
+        "url": "https://docs.spring.io/spring-framework/reference/web/webmvc/mvc-controller/ann-validation.html"
+      },
+      {
+        "title": "Jakarta Bean Validation",
+        "url": "https://jakarta.ee/specifications/bean-validation/"
+      }
+    ],
+    "lab": "examples/hello-api"
+  },
+  {
+    "id": 11,
+    "slug": "problem-detail",
+    "title": "用 ProblemDetail 表达错误",
+    "phase": "02 · HTTP 与可测试 API",
+    "minutes": 30,
+    "prerequisites": [
+      "10"
+    ],
+    "goal": "建立稳定错误合同，并保留服务器诊断能力。",
+    "bridge": "前端需要可判断的错误代码和字段信息，后端需要内部异常链；两者不应被混成一段堆栈文本。",
+    "sections": [
+      {
+        "title": "错误也是一种资源表示",
+        "html": "<p>Problem Details 用标准字段描述HTTP失败，Spring的 ProblemDetail 支持这种表示。status 是HTTP状态，title是简短类别说明，detail帮助解释这一次失败，type标识问题类型，instance可关联出错请求。还可以附加code或字段错误等扩展，但要稳定命名，不要让客户端依赖数据库错误原文。</p><p>一个任务不存在时，用户需要知道无法找到任务；运维需要根据日志定位查询路径。将SQL、服务器目录、堆栈和访问令牌全部塞进detail既不利于前端处理，也会泄漏实现信息。内部日志保留异常链和关联标识，外部响应提供能采取行动的描述；两个面向不同读者的输出都不可省略。</p><p class=\"source-note\">原始资料：<a href=\"https://docs.spring.io/spring-framework/reference/web/webmvc/mvc-ann-rest-exceptions.html\">Spring MVC Error Responses</a>。</p>"
+      },
+      {
+        "title": "在 HTTP 边界集中映射",
+        "html": "<p>@RestControllerAdvice 可将业务异常映射为HTTP响应。让业务服务抛出 TaskMissing，而不是到处拼 ResponseEntity，可避免HTTP协议侵入业务层。下面是可参考的教学片段：状态码是404，稳定code是TASK_NOT_FOUND；实际项目已有错误处理时，先阅读其分类再扩展，不要创建互相竞争的处理器。</p><p>框架自身会产生参数解析、校验和不支持媒体类型等异常。要把这些错误也整合进合同，可以使用Framework提供的异常处理扩展，或启用Boot相关Problem Details能力并做针对性验证。处理器之间有顺序和匹配规则，所以不能只验证业务异常就宣称所有错误统一。</p><pre><code>class TaskMissing extends RuntimeException {}\n\n// 放在 @RestControllerAdvice 中的教学方法\n@org.springframework.web.bind.annotation.ExceptionHandler(TaskMissing.class)\norg.springframework.http.ProblemDetail missing(TaskMissing ex) {\n  var problem = org.springframework.http.ProblemDetail.forStatusAndDetail(\n      org.springframework.http.HttpStatus.NOT_FOUND, &quot;任务不存在&quot;);\n  problem.setTitle(&quot;Task not found&quot;);\n  problem.setProperty(&quot;code&quot;, &quot;TASK_NOT_FOUND&quot;);\n  return problem;\n}</code></pre><p class=\"source-note\">原始资料：<a href=\"https://www.rfc-editor.org/rfc/rfc9457.html\">RFC 9457 Problem Details</a>。</p>"
+      },
+      {
+        "title": "别用统一处理掩盖分类",
+        "html": "<p>catch Exception 然后全部返回400会把数据库宕机伪装成用户输错；全部返回500又会让客户端无法区分可修正输入和服务器故障。异常映射需要明确边界：输入错误、认证授权失败、不存在、并发冲突与基础设施失败分别处理。某些Security错误在MVC之前产生，不能期待ControllerAdvice天然覆盖整个过滤器链。</p><p>还要避免错误接口再次抛错。例如用Map.of构造错误字段时塞入null，会在处理原异常时再发生异常。处理代码应简单、少依赖外部服务。验证时查看真实HTTP状态、Content-Type、JSON结构和日志关联；只看到body里的status=404而状态行为200，并不是正确合同。</p><p>错误代码由接口所有者维护，给前端展示的文案可以随语言调整，但code不能跟着中文句子随意改变。HTTP请求中客户端自带的关联标识也不能完全信任，应限制长度与字符并避免日志注入；没有标识时由服务生成更合适。</p><p class=\"source-note\">原始资料：<a href=\"https://www.rfc-editor.org/rfc/rfc9457.html\">RFC 9457 Problem Details</a>。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "数据库不可达应该被映射成什么性质的失败？",
+      "options": [
+        "用户的输入无效",
+        "服务端处理失败",
+        "资源确定不存在"
+      ],
+      "answer": 1,
+      "explanation": "连接失败不能证明资源不存在或用户输入错误，应保留服务端故障语义。"
+    },
+    "exercise": {
+      "task": "比较不存在、参数错误和未知路由的错误合同。",
+      "steps": [
+        "启动hello-api，查询一个未创建的合法UUID，例如00000000-0000-0000-0000-000000000000。",
+        "提交空白title，再请求不存在路由。",
+        "逐个记录HTTP状态、Content-Type、主要错误字段，比较一致与不同之处。"
+      ],
+      "expected": "不存在与校验失败能被区分；响应不泄漏堆栈、SQL或凭据。",
+      "solution": "任务不存在应为404，字段校验为400。Spring安全过滤器产生的401/403需要Security层相应处理，不应通过扩大ControllerAdvice捕获范围来猜测修复。若未知路由结构不同，把它记录为待统一边界。"
+    },
+    "sources": [
+      {
+        "title": "Spring MVC Error Responses",
+        "url": "https://docs.spring.io/spring-framework/reference/web/webmvc/mvc-ann-rest-exceptions.html"
+      },
+      {
+        "title": "RFC 9457 Problem Details",
+        "url": "https://www.rfc-editor.org/rfc/rfc9457.html"
+      }
+    ],
+    "lab": "examples/hello-api"
+  },
+  {
+    "id": 12,
+    "slug": "testing-layers",
+    "title": "JUnit、MockMvc 与测试边界",
+    "phase": "02 · HTTP 与可测试 API",
+    "minutes": 30,
+    "prerequisites": [
+      "11"
+    ],
+    "goal": "为业务规则、HTTP合同和外部集成选择恰当测试层。",
+    "bridge": "组件单测不能证明整个页面可用；同样，普通Java测试、MVC测试和真实数据库测试证明的是不同范围。",
+    "sections": [
+      {
+        "title": "先问这条测试要证明什么",
+        "html": "<p>纯单元测试直接构造对象，适合状态转换、计算和边界规则；它无需启动Spring，反馈快。MVC切片测试关注路由、参数绑定、校验和响应；业务协作者可以替换。应用集成测试加载更完整的上下文，适合检查装配、事务和外部系统边界。层级更大不代表每条测试价值更高，重复验证getter不会弥补关键失败场景缺失。</p><p>MockMvc 通过MVC基础设施处理模拟请求，通常无需真实HTTP端口。它可以证明请求经过绑定和控制器后得到预期响应，但无法证明反向代理、TLS、真实网络超时或容器部署配置。端到端测试需要额外经过真实服务端口。报告结果时应说清楚测到了哪一层，不用“全都测过”代替范围。</p><p class=\"source-note\">原始资料：<a href=\"https://docs.spring.io/spring-framework/reference/testing/mockmvc.html\">Spring MockMvc</a>。</p>"
+      },
+      {
+        "title": "写能发现行为回归的断言",
+        "html": "<p>好的断言描述业务后果：空白标题不能保存；创建返回201且资源可查询；不存在的任务返回404。只断言方法被调用一次而不看结果，常会错过字段错误或副作用。测试数据应独立，不能依赖上一条测试恰好创建了某个id，否则顺序变化和并行执行都会暴露脆弱性。</p><p>下面演示MockMvc断言风格，项目测试已有对应依赖时可参考扩展。Boot 4的测试模块和部分注解包路径已迁移，优先使用项目现有import和当前官方API。替换Bean使用Framework的 @MockitoBean 等现代支持，不要从旧文章复制已淘汰的测试注解。</p><pre><code>// 教学测试方法，放在已配置 MockMvc 的测试类中\nmockMvc.perform(post(&quot;/api/tasks&quot;)\n    .contentType(&quot;application/json&quot;)\n    .content(&quot;{\\&quot;title\\&quot;:\\&quot; \\&quot;}&quot;))\n  .andExpect(status().isBadRequest());\n\n// 根目录运行现有示例的测试\n// ./mvnw -f examples/hello-api/pom.xml test</code></pre><p class=\"source-note\">原始资料：<a href=\"https://docs.spring.io/spring-boot/reference/testing/index.html\">Spring Boot Testing</a>。</p>"
+      },
+      {
+        "title": "失败注入比快乐路径更有价值",
+        "html": "<p>至少为关键用例保留一个拒绝输入或依赖失败的测试。修改规则后先看测试是否能失败，再恢复正确实现；如果怎么改它都绿，断言可能没有覆盖要害。不要为了通过测试去捕获所有异常并返回默认值，这会把测试的信号消掉。</p><p>Mock 是局部替身，不能证明真实数据库方言、约束、锁和事务行为。后续用Testcontainers补齐数据库证据。运行结果也要区分“通过”“未执行”“因缺少Docker跳过”。构建退出码为零却跳过了集成测试，不等于外部系统行为已经验证。现在先用短反馈循环建立正确断言，再扩展环境。</p><p class=\"source-note\">原始资料：<a href=\"https://docs.spring.io/spring-boot/reference/testing/index.html\">Spring Boot Testing</a>。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "MockMvc 默认无法直接证明哪件事？",
+      "options": [
+        "参数的绑定行为",
+        "控制器的响应码",
+        "公网证书的可用"
+      ],
+      "answer": 2,
+      "explanation": "MockMvc通常不经过真实网络和部署入口，无法证明TLS与代理配置。"
+    },
+    "exercise": {
+      "task": "读懂并运行 hello-api 的现有测试。",
+      "steps": [
+        "执行 ./mvnw -f examples/hello-api/pom.xml test。",
+        "找一条成功测试和一条失败输入测试，写出各自证明的行为。",
+        "设计一个新增边界案例及预期结果；若实施修改，再运行同样命令。"
+      ],
+      "expected": "能区分业务规则断言与HTTP合同断言，并说明真实网络未覆盖。",
+      "solution": "新增案例可选 title 缺失应400且不新增任务；单独调用服务测试其异常，不足以替代MVC的JSON绑定验证。通过报告应记录测试数和命令；若所有测试被跳过，不能写“测试通过”。"
+    },
+    "sources": [
+      {
+        "title": "Spring MockMvc",
+        "url": "https://docs.spring.io/spring-framework/reference/testing/mockmvc.html"
+      },
+      {
+        "title": "Spring Boot Testing",
+        "url": "https://docs.spring.io/spring-boot/reference/testing/index.html"
+      }
+    ],
+    "lab": "examples/hello-api"
+  },
+  {
+    "id": 13,
+    "slug": "relational-model",
+    "title": "用 PostgreSQL 建立关系模型",
+    "phase": "03 · 数据库与事务",
+    "minutes": 35,
+    "prerequisites": [
+      "12"
+    ],
+    "goal": "让数据库约束独立维护数据有效性，而非只依赖服务代码。",
+    "bridge": "前端对象可以临时不完整；数据库是持久化事实来源，要在并发和多入口下保持约束。",
+    "sections": [
+      {
+        "title": "从业务不变量反推表结构",
+        "html": "<p>先写业务规则，再选择字段。任务必须属于一个合法用户，标题不能为空，同一用户的业务编号不可重复；这些规则分别对应外键、非空或检查约束、唯一约束。主键标识一行，业务唯一键表达另一种不重复要求，二者通常不是同一回事。字符串“001”与数字1也不应仅为方便就混用。</p><p>金额使用精确数值或最小货币单位，时间需明确是否是时间点。PostgreSQL的timestamptz存储时间点并按会话时区显示，不保存输入时的原始时区名称；若业务需要地区时区规则，还应保存对应标识。NULL表示缺失或未知，判断使用IS NULL，不能用等号与NULL比较。</p><p class=\"source-note\">原始资料：<a href=\"https://www.postgresql.org/docs/current/ddl-constraints.html\">PostgreSQL Constraints</a>。</p>"
+      },
+      {
+        "title": "运行一个可回滚的独立模型",
+        "html": "<p>在根目录执行 docker compose up -d postgres，随后执行 docker compose exec postgres psql -U learning -d learning 进入专用学习数据库。下列实验全在事务内创建临时命名的教学表，并在最后回滚，不依赖task-service真实表名。你可以把SQL整体保存后执行，也可逐句运行观察结果。正式服务结构仍由Flyway管理，不手工修改线上表。</p><p>第一张表维护用户，第二张表维护任务。外键确保不能引用不存在的用户，检查约束保证状态只能是枚举集合。注意检查约束并不能替代NOT NULL，因为NULL参与检查时可能得到未知而不被拒绝。语义明确的约束能让SQL客户端、批处理和HTTP接口共享同一底线。</p><pre><code>BEGIN;\nCREATE TABLE lab_users (id bigint PRIMARY KEY, email text NOT NULL UNIQUE);\nCREATE TABLE lab_tasks (\n  id bigint PRIMARY KEY,\n  owner_id bigint NOT NULL REFERENCES lab_users(id),\n  title text NOT NULL CHECK (length(trim(title)) &gt; 0),\n  status text NOT NULL CHECK (status IN (&#x27;TODO&#x27;,&#x27;DONE&#x27;)),\n  created_at timestamptz NOT NULL DEFAULT now()\n);\nINSERT INTO lab_users VALUES (1, &#x27;learner@example.test&#x27;);\nINSERT INTO lab_tasks(id, owner_id, title, status) VALUES (1,1,&#x27;学SQL&#x27;,&#x27;TODO&#x27;);\nSELECT t.title,u.email FROM lab_tasks t JOIN lab_users u ON u.id=t.owner_id;\nROLLBACK;</code></pre><p class=\"source-note\">原始资料：<a href=\"https://www.postgresql.org/docs/current/datatype-datetime.html\">PostgreSQL Date/Time Types</a>。</p>"
+      },
+      {
+        "title": "关系数据库共享思想，方言并不相同",
+        "html": "<p>PostgreSQL和MySQL都支持关系模型、索引和事务，但自增写法、JSON操作、大小写行为、时间类型、错误码及默认隔离级别有差异。MySQL还要明确使用支持事务的引擎。课程主线统一PostgreSQL，跨库时重新跑真实数据库测试，不以H2兼容模式作为完整迁移证明。</p><p>常见陷阱是把全部业务结构放进JSON列，这确实灵活，却可能失去清晰的约束与查询路径。稳定、需要筛选或关联的核心字段适合关系列；变化快的附属内容再考虑JSON。扩展练习可以为任务加优先级，但先说明值域和默认值，再决定类型和约束，而不是照着接口字段机械建表。</p><p>数据库约束错误应在应用层转换为可理解的结果，但不要因害怕出现错误就删除约束。应用预检查能改善用户体验，数据库约束处理并发竞争，两者应一起存在。模型评审时用两个同时提交的请求作为例子，更容易发现只靠单线程推理遗漏的不变量。</p><p class=\"source-note\">原始资料：<a href=\"https://www.postgresql.org/docs/current/datatype-datetime.html\">PostgreSQL Date/Time Types</a>。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "在SQL中判断列为空应该使用什么？",
+      "options": [
+        "使用空值谓词",
+        "使用空值等号",
+        "使用空串等号"
+      ],
+      "answer": 0,
+      "explanation": "NULL不是普通值，与NULL做等号比较不会像JavaScript的空值判断那样工作。"
+    },
+    "exercise": {
+      "task": "执行临时关系模型，并验证至少一个约束。",
+      "steps": [
+        "确认PostgreSQL运行，通过README给定的psql命令连接专用学习库。",
+        "执行本课事务脚本，JOIN应返回一条任务与用户邮箱。",
+        "重新BEGIN建表，在SAVEPOINT之后插入owner_id=999，观察错误后ROLLBACK结束。"
+      ],
+      "expected": "合法关联查询得到“学SQL”；不存在的owner被外键拒绝；最终无教学表残留。",
+      "solution": "外键错误证明数据库独立维护引用完整性。PostgreSQL事务发生错误后需ROLLBACK，或ROLLBACK TO对应SAVEPOINT后继续；不能忽略错误直接提交后续SQL。"
+    },
+    "sources": [
+      {
+        "title": "PostgreSQL Constraints",
+        "url": "https://www.postgresql.org/docs/current/ddl-constraints.html"
+      },
+      {
+        "title": "PostgreSQL Date/Time Types",
+        "url": "https://www.postgresql.org/docs/current/datatype-datetime.html"
+      }
+    ],
+    "lab": "独立 PostgreSQL / psql 实验"
+  },
+  {
+    "id": 14,
+    "slug": "jdbc-pool",
+    "title": "JDBC 参数绑定与连接池",
+    "phase": "03 · 数据库与事务",
+    "minutes": 30,
+    "prerequisites": [
+      "13"
+    ],
+    "goal": "写安全的参数化SQL，并解释连接池耗尽时请求为什么等待。",
+    "bridge": "数据库调用像访问远程API：有连接成本、资源上限和失败模式；它不是零成本的本地数组操作。",
+    "sections": [
+      {
+        "title": "连接、事务与SQL的不同职责",
+        "html": "<p>JDBC是Java访问关系数据库的基础接口，驱动实现具体协议，DataSource提供连接，连接池复用有限数量的物理连接。Spring的JdbcTemplate或JdbcClient处理常见资源管理和异常转换，让你集中写SQL与映射。连接用完要归还，归还到池通常不等于真的断开数据库TCP连接。</p><p>连接池大不一定吞吐高。数据库CPU、锁和磁盘都有限；大量并发SQL可能彼此争抢而更慢。长事务或慢查询长期占用连接，会让后续请求等待；应用线程变多也不会凭空增加数据库处理能力。评估池容量时同时观察等待时间、活跃连接、数据库负载和请求超时。</p><p class=\"source-note\">原始资料：<a href=\"https://docs.spring.io/spring-framework/reference/data-access/jdbc/core.html\">Spring JDBC Core / JdbcClient</a>。</p>"
+      },
+      {
+        "title": "绑定的是值，不能绑定SQL语法",
+        "html": "<p>把用户输入用字符串拼进SQL可能改变语句结构。参数绑定将数据交给驱动处理，标题中的引号仍作为内容。动态表名、排序列和ASC/DESC属于语法，不能指望一个问号参数安全替换它们；应从固定白名单选择经过验证的SQL片段。校验输入长度和参数化不是二选一，二者解决不同问题。</p><p>下面是针对教学lab_tasks表的JdbcClient方法示意，需在带JDBC依赖的类中注入JdbcClient，不能直接粘到纯jshell运行。optional表达至多一行可能不存在；single要求恰好一行。更新后的影响行数必须检查，尤其是条件更新，零行可能意味着不存在或并发版本已变化。</p><pre><code>record TaskRow(long id, String title) {}\n\n// jdbc 是通过构造器注入的 JdbcClient\nvar task = jdbc.sql(&quot;select id,title from lab_tasks where id=:id&quot;)\n    .param(&quot;id&quot;, requestedId)\n    .query(TaskRow.class)\n    .optional();\n\nint updated = jdbc.sql(&quot;update lab_tasks set title=:title where id=:id&quot;)\n    .param(&quot;title&quot;, userInput) // 永远不拼接用户标题\n    .param(&quot;id&quot;, requestedId)\n    .update();</code></pre><p class=\"source-note\">原始资料：<a href=\"https://docs.spring.io/spring-boot/reference/data/sql.html\">Boot SQL Databases 与连接池</a>。</p>"
+      },
+      {
+        "title": "用独立SQL理解参数边界",
+        "html": "<p>执行 docker compose exec postgres psql -U learning -d learning 进入学习库后，psql的PREPARE/EXECUTE能够在没有Java代码的情况下展示参数值与SQL结构的区别。该机制不等于JDBC驱动全部实现细节，却能帮助你形成正确心智模型。下面恶意形状的文本只作为字符串返回，不会额外执行删除命令。实验不包含真实敏感表。</p><p>常见陷阱是查询循环中为每条记录再执行一次SQL，引起N+1；另一个是把HTTP远程调用放进数据库事务，连接一直被占用。先尽量缩短数据库资源持有时间，再讨论连接池大小。报告性能时给出测量，不用“用了连接池所以一定快”代替证据。</p><pre><code>PREPARE echo_title(text) AS SELECT $1 AS title;\nEXECUTE echo_title(&#x27;x&#x27;&#x27;; DROP TABLE imaginary; --&#x27;);\nDEALLOCATE echo_title;</code></pre><p>连接超时、查询超时与事务超时是不同预算。连接超时可能花在等待池中空闲连接，查询超时约束SQL执行，事务超时覆盖事务工作。给所有值写同一个数字不一定满足请求总预算，应把最外层请求期限和内部每次尝试的剩余时间一起考虑。</p><p class=\"source-note\">原始资料：<a href=\"https://docs.spring.io/spring-boot/reference/data/sql.html\">Boot SQL Databases 与连接池</a>。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "用户可选排序字段应该怎样进入SQL？",
+      "options": [
+        "直接字符串拼接",
+        "从固定白名单选",
+        "作为任意问号值"
+      ],
+      "answer": 1,
+      "explanation": "标识符和排序方向是SQL语法，不能用普通值绑定替代；白名单限制可选结构。"
+    },
+    "exercise": {
+      "task": "在psql验证参数作为数据，并审查一条应用SQL。",
+      "steps": [
+        "连接专用学习库，执行PREPARE/EXECUTE/DEALLOCATE。",
+        "确认结果完整返回看似SQL注入的字符串。",
+        "阅读task-service数据访问代码，标记值绑定、映射和影响行数检查位置。"
+      ],
+      "expected": "恶意形状的字符串被原样当数据处理；能指出SQL结构与参数边界。",
+      "solution": "输出title应是 x'; DROP TABLE imaginary; -- 这段文本，没有第二条SQL被执行。Java里使用param绑定用户值；排序字段只能映射到预先允许的列名。若应用用JPA，则检查其绑定参数和生成SQL，原理相同。"
+    },
+    "sources": [
+      {
+        "title": "Spring JDBC Core / JdbcClient",
+        "url": "https://docs.spring.io/spring-framework/reference/data-access/jdbc/core.html"
+      },
+      {
+        "title": "Boot SQL Databases 与连接池",
+        "url": "https://docs.spring.io/spring-boot/reference/data/sql.html"
+      }
+    ],
+    "lab": "独立 PostgreSQL / psql 实验；examples/task-service"
+  },
+  {
+    "id": 15,
+    "slug": "jpa-state",
+    "title": "JPA 实体生命周期与脏检查",
+    "phase": "03 · 数据库与事务",
+    "minutes": 30,
+    "prerequisites": [
+      "14"
+    ],
+    "goal": "区分普通对象、托管实体、SQL同步与事务提交。",
+    "bridge": "前端状态更新通常立即修改内存；JPA还维护一层持久化上下文，内存改变与SQL发送、提交不是同一时刻。",
+    "sections": [
+      {
+        "title": "实体不是JSON，也不是表本身",
+        "html": "<p>JPA是持久化规范，Hibernate是常用实现，Spring Data JPA再提供仓库抽象。实体表达持久化身份和状态，使用jakarta.persistence注解。为满足映射与实例化约定，实体一般使用普通类和无参构造器，不直接采用record。对外传输仍使用DTO，避免把关联关系、内部字段和懒加载行为暴露到JSON序列化。</p><p>new出来的实体还没有被持久化上下文管理；persist后成为托管状态；上下文关闭或detach后，Java对象还存在但不再受脏检查追踪。remove标记删除，实际SQL时机仍与flush相关。理解状态比记住save方法更重要，否则你很难解释为什么改了字段却没有更新数据库。</p><p class=\"source-note\">原始资料：<a href=\"https://docs.spring.io/spring-data/jpa/reference/jpa/entity-persistence.html\">Spring Data JPA Persisting Entities</a>。</p>"
+      },
+      {
+        "title": "保存、合并与脏检查",
+        "html": "<p>在活动事务中读取到的托管实体，修改字段后通常由脏检查在flush时生成更新，无需每次再显式save。Spring Data save会根据实体是否为新对象决定persist或merge；merge返回托管副本，传进去的原对象并不会因此必然变成托管对象。忽略返回对象再继续修改，可能产生令人困惑的结果。</p><p>下面是教学实体片段，展示身份、版本和修改入口。它不要求替换项目现有实体。完成映射还要匹配数据库迁移，并由事务服务调用；只有实体类本身不能证明数据库操作成功。把状态改变收口到有业务名称的方法，可比公开所有setter更容易维护规则。</p><pre><code>import jakarta.persistence.*;\n@Entity\nclass NoteEntity {\n  @Id @GeneratedValue(strategy = GenerationType.IDENTITY)\n  private Long id;\n  @Version private Long version;\n  @Column(nullable = false) private String title;\n  protected NoteEntity() {} // 供持久化框架实例化\n  NoteEntity(String title) { rename(title); }\n  void rename(String title) {\n    if (title == null || title.isBlank()) throw new IllegalArgumentException();\n    this.title = title;\n  }\n}</code></pre><p class=\"source-note\">原始资料：<a href=\"https://jakarta.ee/specifications/persistence/\">Jakarta Persistence 规范</a>。</p>"
+      },
+      {
+        "title": "flush不等于commit",
+        "html": "<p>flush把持久化上下文中的改动同步为SQL，commit才最终提交事务。flush后如果事务回滚，普通事务性数据库中的修改仍应撤销。约束错误有时到flush或commit才出现，因此“save没抛异常”不能保证提交成功。生成ID也不意味着这条记录已经永久可见。</p><p>懒加载关联需要可用的持久化上下文，离开事务后访问可能报错。不要通过无条件保持会话跨整个HTTP请求来掩盖边界；更清晰的方案是在事务内完成需要的查询并映射DTO。练习先画出对象状态，再读取真实项目的服务事务和实体映射。如果项目某个路径用JDBC，也应理解它没有JPA这一层脏检查。</p><p>持久化上下文还提供同一身份对象的一致视图，同一上下文中重复读取同一个主键可能得到同一托管实例。批量处理大量实体时，这些对象占用内存；需要按批次处理与适当清理，而不能把所有记录读入一个超长事务后再逐一修改。</p><p>项目对应文件是 examples/task-service/src/main/java/dev/learning/tasks/TaskEntity.java 与 TaskService.java。先在实体上找到 @Version，再在 transition 中找到 tasks.flush()，把真实代码与本课的状态图逐一对应。</p><p class=\"source-note\">原始资料：<a href=\"https://jakarta.ee/specifications/persistence/\">Jakarta Persistence 规范</a>。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "flush成功但随后事务回滚，普通更新会怎样？",
+      "options": [
+        "更新会永久保存",
+        "仅保留对象编号",
+        "数据库更新撤销"
+      ],
+      "answer": 2,
+      "explanation": "flush只是同步SQL，不等于提交；事务回滚仍撤销该事务中的数据库更新。"
+    },
+    "exercise": {
+      "task": "用事件序列推导实体状态与最终数据库结果。",
+      "steps": [
+        "写下序列：new→persist→修改title→flush→rollback。",
+        "标出每一步对象是否托管、是否可能已经发SQL。",
+        "阅读task-service持久化实现，找出事务边界；如果它使用JDBC，明确写出不涉及脏检查。"
+      ],
+      "expected": "能说明内存对象可能仍有修改后的title，但数据库事务已经撤销。",
+      "solution": "new为瞬态，persist后托管，修改被追踪，flush可能执行INSERT/UPDATE，rollback撤销数据库修改。Java对象字段不保证自动恢复。项目使用JPA，TaskService.transition中的tasks.flush()用于让版本更新和冲突在构建事件之前发生。"
+    },
+    "sources": [
+      {
+        "title": "Spring Data JPA Persisting Entities",
+        "url": "https://docs.spring.io/spring-data/jpa/reference/jpa/entity-persistence.html"
+      },
+      {
+        "title": "Jakarta Persistence 规范",
+        "url": "https://jakarta.ee/specifications/persistence/"
+      }
+    ],
+    "lab": "examples/task-service；实体状态推演"
+  },
+  {
+    "id": 16,
+    "slug": "flyway",
+    "title": "用 Flyway 管理数据库演进",
+    "phase": "03 · 数据库与事务",
+    "minutes": 30,
+    "prerequisites": [
+      "15"
+    ],
+    "goal": "把表结构变化做成可追踪、可重放的迁移。",
+    "bridge": "前端版本升级主要替换静态资源；后端部署还要让新旧代码与已有数据库兼容，数据不能随发版丢弃。",
+    "sections": [
+      {
+        "title": "数据库结构也需要版本历史",
+        "html": "<p>Flyway将有版本的迁移按顺序应用，并在历史表记录执行情况与校验信息。创建表和后来添加字段是不同迁移，已经在共享环境执行过的版本脚本不应随意改写。否则新环境与老环境可能获得不同结构，历史校验也会暴露漂移。修复通常新增迁移，而不是把旧脚本改成“现在看起来正确”。</p><p>版本号表达执行顺序，描述表达意图，例如V1__create_tasks.sql。文件名、位置与数据库支持模块都必须正确。Boot 4中Flyway采用明确的starter，PostgreSQL还需要对应数据库支持；不要把依赖加上却没有读取启动日志，就假定迁移一定跑过。</p><p class=\"source-note\">原始资料：<a href=\"https://docs.spring.io/spring-boot/how-to/data-initialization.html\">Spring Boot Database Initialization</a>。</p>"
+      },
+      {
+        "title": "用扩展再收缩降低发布耦合",
+        "html": "<p>假设想把title改成summary。直接改列名可能让旧实例立刻失败。更稳妥的过程是先增加新列，让代码兼容读取与写入，分批回填旧数据，确认全部实例升级后再删除旧列。不是每次修改都要这么复杂，但遇到滚动发布、多服务共享数据库或大表时，必须先思考兼容窗口。</p><p>下面是独立教学迁移，不要复制覆盖task-service已有V1。第一份创建notes，第二份增加允许为空的description，第三步再讨论如何回填并收紧约束。给非空大字段加默认值、创建索引、修改类型都可能产生锁与执行时间，需要在接近真实数据规模下验证。</p><pre><code>-- 教学 V1__create_notes.sql\nCREATE TABLE notes (\n  id bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,\n  title varchar(120) NOT NULL\n);\n\n-- 教学 V2__add_description.sql\nALTER TABLE notes ADD COLUMN description text;\n\n-- 查看历史：在实际应用数据库执行\nSELECT installed_rank, version, description, success\nFROM flyway_schema_history ORDER BY installed_rank;</code></pre><p class=\"source-note\">原始资料：<a href=\"https://documentation.red-gate.com/flyway\">Flyway 官方文档</a>。</p>"
+      },
+      {
+        "title": "迁移失败与回滚要提前设计",
+        "html": "<p>开发阶段使用Hibernate自动建表很方便，但生产结构应由一种明确的迁移策略管理；不要混用schema.sql、自动ddl更新和Flyway争抢同一张表。应用可以用映射校验发现不匹配，却不应在启动时悄悄随意重塑生产结构。H2能证明部分流程，但不能证明PostgreSQL的DDL锁行为与方言。</p><p>Flyway成功不意味着业务数据回填已正确；迁移脚本应验证数量、约束和兼容性。灾难恢复靠备份与恢复演练，不能假定任何DDL都有简单反向语句。repair修改历史元数据，也不是删除失败证据的快捷键。先确定实际结构和失败原因，再决定修复路径。</p><p>创建全新数据库与升级已有数据库都要测试。前者证明迁移链可以从零重放，后者证明真实旧数据满足新增约束。只测空库经常漏掉历史NULL、重复值或字段长度超限，所以部署前要用脱敏且具有代表性的数据验证升级路径。</p><p class=\"source-note\">原始资料：<a href=\"https://documentation.red-gate.com/flyway\">Flyway 官方文档</a>。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "已在共享环境执行的V1需要修复时通常怎样做？",
+      "options": [
+        "新增后续迁移",
+        "随意改写原版",
+        "删除全部历史"
+      ],
+      "answer": 0,
+      "explanation": "追加迁移保持历史可追踪；改写旧版本会导致环境漂移或校验失败。"
+    },
+    "exercise": {
+      "task": "检查task-service迁移历史并设计一次兼容新增字段。",
+      "steps": [
+        "按README启动task-service；定位src/main/resources/db/migration中的脚本。",
+        "在PostgreSQL模式下查询flyway_schema_history，核对文件与记录。",
+        "写出给任务增加可选description的下一版本迁移草案，先不执行。"
+      ],
+      "expected": "迁移记录与文件对应；新增字段方案不要求旧实例立刻认识该字段。",
+      "solution": "当前初始迁移是V1__task_and_outbox.sql，新增草案可命名V2__add_task_description.sql，内容ALTER TABLE tasks ADD COLUMN description text;。先允许NULL以兼容旧代码，回填验证后再用后续迁移收紧约束；新版本号仍需创建时复查以免冲突。"
+    },
+    "sources": [
+      {
+        "title": "Spring Boot Database Initialization",
+        "url": "https://docs.spring.io/spring-boot/how-to/data-initialization.html"
+      },
+      {
+        "title": "Flyway 官方文档",
+        "url": "https://documentation.red-gate.com/flyway"
+      }
+    ],
+    "lab": "examples/task-service；PostgreSQL迁移观察"
+  },
+  {
+    "id": 17,
+    "slug": "transaction-rollback",
+    "title": "用事务保护完整业务结果",
+    "phase": "03 · 数据库与事务",
+    "minutes": 30,
+    "prerequisites": [
+      "16"
+    ],
+    "goal": "通过失败实验确认多次数据库修改一起成功或一起撤销。",
+    "bridge": "多个await不自动成为一个原子业务；后端也不能把“先后调用成功过”当成一致性保证。",
+    "sections": [
+      {
+        "title": "原子性保护一个业务单位",
+        "html": "<p>转账需要扣减甲账户并增加乙账户，任务变更需要更新任务并记录待发送事件。如果第二步失败而第一步已经永久提交，系统留下半成品。数据库事务把相关操作组成一个提交单位，失败时回滚。隔离性处理并发可见性，持久性处理提交后的保存保证，一致性则仍需正确业务规则和约束共同维护。</p><p>事务不能覆盖任意外部副作用。数据库回滚不会自动撤销已经发出的邮件、HTTP请求或Kafka消息。本项目把任务与outbox_events写在同一数据库事务，后续再发送消息，就是为了把“必须同时落库”的状态先绑定起来。事务中直接发送外部通知，仍然有数据库提交与通知成功之间的间隙。</p><p class=\"source-note\">原始资料：<a href=\"https://docs.spring.io/spring-framework/reference/data-access/transaction/declarative/annotations.html\">Spring @Transactional</a>。</p>"
+      },
+      {
+        "title": "用故障而不是快乐路径证明回滚",
+        "html": "<p>以下实验在psql同一个会话中完成。临时表只存在于当前会话，初始余额各100。第一次事务扣减后主动回滚，应恢复总额与各账户余额；第二次正常提交后余额变成70与130。先预测结果再执行，比背诵ACID更容易形成可以迁移到代码的判断。</p><p>如果SQL发生约束错误，PostgreSQL事务会进入失败状态，需要回滚或回到保存点。不要把某条SQL失败后继续执行的结果，与成功提交混为一谈。把每次检查放在事务结束之后，还可避免只看到自己事务中的未提交数据而误判成功。</p><pre><code>CREATE TEMP TABLE lab_accounts(id integer PRIMARY KEY, balance integer NOT NULL CHECK(balance&gt;=0));\nINSERT INTO lab_accounts VALUES (1,100),(2,100);\nBEGIN;\nUPDATE lab_accounts SET balance=balance-30 WHERE id=1;\nROLLBACK;\nSELECT * FROM lab_accounts ORDER BY id;\nBEGIN;\nUPDATE lab_accounts SET balance=balance-30 WHERE id=1;\nUPDATE lab_accounts SET balance=balance+30 WHERE id=2;\nCOMMIT;\nSELECT * FROM lab_accounts ORDER BY id;</code></pre><p class=\"source-note\">原始资料：<a href=\"https://www.postgresql.org/docs/current/tutorial-transactions.html\">PostgreSQL Transactions</a>。</p>"
+      },
+      {
+        "title": "Spring回滚规则需要明确",
+        "html": "<p>@Transactional通常放在公开业务用例方法上，让一次用例包含的仓库操作共享事务。默认情况下RuntimeException和Error触发回滚，受检异常默认不会；可通过rollbackFor或全局策略显式调整。不能只看异常名字是否含Error就猜测行为，必须看类型及实际配置。catch住异常后正常返回，也可能使事务继续提交。</p><p>readOnly=true主要表达只读意图并给底层优化机会，不是跨所有驱动都可靠的写入防火墙。事务应尽量短，避免用户交互和慢网络占用连接。对照TaskService.create与transition，找出任务写入和outbox写入为什么属于同一个用例，并思考第二步异常是否真的穿过事务边界。</p><p class=\"source-note\">原始资料：<a href=\"https://www.postgresql.org/docs/current/tutorial-transactions.html\">PostgreSQL Transactions</a>。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "数据库事务回滚能直接撤销什么？",
+      "options": [
+        "已发送出的邮件",
+        "事务内数据修改",
+        "已完成远程付款"
+      ],
+      "answer": 1,
+      "explanation": "本地数据库事务只控制它管理的数据库修改，外部副作用需要额外一致性设计。"
+    },
+    "exercise": {
+      "task": "完成余额回滚实验，并映射到task-service事务。",
+      "steps": [
+        "docker compose up -d postgres；docker compose exec postgres psql -U learning -d learning。",
+        "执行临时账户脚本，记录两次查询余额。",
+        "阅读TaskService的@Transactional和outbox.append调用位置，解释异常传播。"
+      ],
+      "expected": "回滚后100/100；提交后70/130；能说明任务与outbox必须同事务。",
+      "solution": "第一次UPDATE撤销，第二次两个UPDATE一起提交，总额始终200。TaskService在公开事务方法中调用append，若append抛出未被吞掉的运行时异常，事务应回滚；最终证据应来自失败注入测试。"
+    },
+    "sources": [
+      {
+        "title": "Spring @Transactional",
+        "url": "https://docs.spring.io/spring-framework/reference/data-access/transaction/declarative/annotations.html"
+      },
+      {
+        "title": "PostgreSQL Transactions",
+        "url": "https://www.postgresql.org/docs/current/tutorial-transactions.html"
+      }
+    ],
+    "lab": "独立 PostgreSQL / psql 实验；examples/task-service"
+  },
+  {
+    "id": 18,
+    "slug": "transaction-proxy",
+    "title": "代理、自调用、传播与隔离",
+    "phase": "03 · 数据库与事务",
+    "minutes": 30,
+    "prerequisites": [
+      "17"
+    ],
+    "goal": "准确判断事务从哪里开始，遇到嵌套调用如何组合。",
+    "bridge": "装饰器写在方法上不等于每一次调用都被拦截；Spring事务的常见实现依赖调用经过代理对象。",
+    "sections": [
+      {
+        "title": "先画调用路径再看注解",
+        "html": "<p>默认代理模式中，调用者先进入代理，代理开启或加入事务，再调用目标方法。目标对象内部用this调用另一个方法，通常不会重新经过代理，因此内部方法上的事务属性不因该调用而生效。如果外层本来已有事务，内部代码仍在那笔事务中执行；“自调用无效”不意味着内部永远没有事务，而是不会按内部注解新建或改变边界。</p><p>构造器、初始化方法和手动new对象也不应被假定享有完整代理增强。解决自调用问题通常是把独立事务用例拆到另一个Bean，或用TransactionTemplate明确包围需要的代码。不要为了绕过代理限制引入隐藏的自我注入，让调用图更难理解。</p><p class=\"source-note\">原始资料：<a href=\"https://docs.spring.io/spring-framework/reference/data-access/transaction/declarative/annotations.html\">Spring @Transactional 代理语义</a>。</p>"
+      },
+      {
+        "title": "传播解决嵌套边界，隔离解决并发观察",
+        "html": "<p>REQUIRED在已有事务时加入，否则新建，是常见默认行为。REQUIRES_NEW建立独立事务，外层会被挂起；内部提交后，外层随后回滚并不会撤销已独立提交的内部结果。它也可能需要额外数据库连接，多个外层事务同时等待内部连接会耗尽连接池。NESTED通常借助保存点，是否支持取决于事务管理器和资源。</p><p>隔离级别是另一维度。PostgreSQL默认Read Committed下，不同语句可看到不同的已提交快照；Repeatable Read提供更稳定快照，但不等同于自动防止全部业务并发异常。Serializable可能拒绝无法串行化的事务，应用需要有界重试整个事务。MySQL默认配置常不同，不能按名称猜测完全相同的实现行为。</p><pre><code>// 教学反例：inner 的 REQUIRES_NEW 不会因 this 调用而生效\n@Transactional\npublic void outer() {\n  this.inner();\n}\n@Transactional(propagation = Propagation.REQUIRES_NEW)\npublic void inner() {\n  // 若需独立事务，移到另一个注入Bean再由outer调用\n}\n\n// psql中确认当前会话隔离级别\n// SHOW transaction_isolation;</code></pre><p class=\"source-note\">原始资料：<a href=\"https://docs.spring.io/spring-framework/reference/data-access/transaction/declarative/tx-propagation.html\">Spring 事务传播</a>。</p>"
+      },
+      {
+        "title": "rollback-only也是需要处理的状态",
+        "html": "<p>内部REQUIRED调用与外层共享同一物理事务。如果内部把事务标记为rollback-only，外层即使捕获异常并继续执行，也不能保证最后提交成功，可能收到UnexpectedRollbackException。这不是框架“明明没异常却回滚”，而是先前的失败已经影响共同事务。正确做法是明确用例的失败合同，而非在外层无限catch。</p><p>本项目private append没有自己的事务注解，但从public事务方法调用时仍使用现有事务，这是有意的结构。与自调用反例比较，可避免误以为每个数据库方法都必须再写一次注解。练习中分别写出逻辑方法边界和物理事务数量，能把两层区分开才算掌握传播。</p><p class=\"source-note\">原始资料：<a href=\"https://www.postgresql.org/docs/current/transaction-iso.html\">PostgreSQL 隔离级别</a>。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "外层有事务并this调用内部方法时，内部通常怎样？",
+      "options": [
+        "必定新开事务",
+        "必定没有事务",
+        "沿用外层事务"
+      ],
+      "answer": 2,
+      "explanation": "内部注解不会被这次自调用重新拦截，但已有外层事务仍覆盖执行过程。"
+    },
+    "exercise": {
+      "task": "分析三个调用场景的物理事务数量。",
+      "steps": [
+        "场景A：无事务调用者→代理outer REQUIRED→this.inner REQUIRES_NEW。",
+        "场景B：无事务调用者→代理outer REQUIRED→另一个Bean的inner REQUIRES_NEW。",
+        "场景C：outer REQUIRED→另一个Bean的inner REQUIRED，内部标记rollback-only。"
+      ],
+      "expected": "A一笔事务；B两笔独立事务；C一笔共同事务且最终不能正常提交。",
+      "solution": "A内部注解没有经过代理，仍是一笔；B外层挂起、内部独立提交或回滚；C共享物理事务，外层捕获异常不能取消rollback-only。实际是否支持某传播方式需看事务管理器。"
+    },
+    "sources": [
+      {
+        "title": "Spring @Transactional 代理语义",
+        "url": "https://docs.spring.io/spring-framework/reference/data-access/transaction/declarative/annotations.html"
+      },
+      {
+        "title": "Spring 事务传播",
+        "url": "https://docs.spring.io/spring-framework/reference/data-access/transaction/declarative/tx-propagation.html"
+      },
+      {
+        "title": "PostgreSQL 隔离级别",
+        "url": "https://www.postgresql.org/docs/current/transaction-iso.html"
+      }
+    ],
+    "lab": "examples/task-service"
+  },
+  {
+    "id": 19,
+    "slug": "optimistic-concurrency",
+    "title": "乐观锁与原子条件更新",
+    "phase": "03 · 数据库与事务",
+    "minutes": 35,
+    "prerequisites": [
+      "18"
+    ],
+    "goal": "防止两个请求覆盖同一份状态，并把冲突反馈给客户端。",
+    "bridge": "两个浏览器标签页保存同一表单时，后提交的人可能携带旧数据；后端需要识别“我修改的还是原来那一版吗”。",
+    "sections": [
+      {
+        "title": "丢失更新与超卖是不同表现的同类问题",
+        "html": "<p>两个事务都读到库存1，各自在内存里减一后写0，表面库存不为负，但已经卖出两件。任务也一样：两个标签页都读到version=3，分别提交不同状态，后写入可能覆盖前一次。只在业务代码里先查询检查，不能阻止检查与写入之间出现竞争。</p><p>乐观锁把版本加入更新条件。JPA的@Version使更新通常包含旧版本条件并递增版本，影响行数不符时抛出乐观锁异常。API同时让客户端回传它看到的版本，可更早识别过期编辑；数据库的版本条件才守住最后的并发边界。预检查不替代@Version，两者覆盖不同时间窗口。</p><p class=\"source-note\">原始资料：<a href=\"https://docs.spring.io/spring-data/jpa/reference/jpa/locking.html\">Spring Data JPA Locking</a>。</p>"
+      },
+      {
+        "title": "把不变量写进同一条SQL",
+        "html": "<p>库存扣减可直接表达为UPDATE ... SET quantity=quantity-1 WHERE quantity&gt;0。判断与修改由数据库在同一语句中完成，受影响行数为1才代表扣减成功。乐观版本更新也类似：WHERE id=? AND version=?，同时SET version=version+1。不能忽略返回0，否则客户端会以为修改成功。</p><p>以下独立实验用专门schema lab_l19，让两个psql会话共享同一行。先由会话A建表并插入，随后A更新但暂不提交，B执行相同扣减会等待；A提交后B重新判断条件，应更新0行。执行完只清理本课schema，避免影响应用表。</p><pre><code>CREATE SCHEMA lab_l19;\nCREATE TABLE lab_l19.stock(id integer PRIMARY KEY, quantity integer NOT NULL);\nINSERT INTO lab_l19.stock VALUES (1,1);\n-- 会话A：执行更新后暂时停住\nBEGIN;\nUPDATE lab_l19.stock SET quantity=quantity-1 WHERE id=1 AND quantity&gt;0;\n-- 会话B：同样执行BEGIN和UPDATE，观察等待\n-- 会话A：COMMIT;\n-- 会话B：等待结束，预期UPDATE 0，然后COMMIT;\n-- 两边事务结束后查询：\nSELECT * FROM lab_l19.stock;\n-- 实验结束清理：DROP SCHEMA lab_l19 CASCADE;</code></pre><p class=\"source-note\">原始资料：<a href=\"https://www.postgresql.org/docs/current/transaction-iso.html\">PostgreSQL 并发控制</a>。</p>"
+      },
+      {
+        "title": "冲突需要可理解的恢复路径",
+        "html": "<p>任务修改冲突适合返回409，让前端重新读取最新状态，再让用户决定是否重新提交。不能把旧请求原封不动无限重试，因为它携带的业务意图可能已经失效。对机器可重试的短事务，可使用有限次数、退避和幂等性保护；重试范围应包含重新读取与重新计算，而不是只重复失败的SQL。</p><p>本项目TaskService.transition接收expectedVersion，并在flush后生成包含新版本的事件。flush提前暴露并发异常，避免用旧版本构造后续事件。常见陷阱是在乐观锁异常后继续使用同一持久化上下文；事务可能已失败，正确做法是结束它，再在新事务重新获取状态。</p><p>本项目的状态机只允许TODO到IN_PROGRESS再到DONE，版本正确也不代表任意状态跳转合法。业务状态检查与版本竞争检查缺一不可；前端收到最新版本后也应重新判断用户意图，不能为了消除冲突自动把所有旧输入覆盖上去。</p><p class=\"source-note\">原始资料：<a href=\"https://www.postgresql.org/docs/current/transaction-iso.html\">PostgreSQL 并发控制</a>。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "条件扣减返回影响行数0，应如何解释？",
+      "options": [
+        "本次未发生扣减",
+        "本次已完成扣减",
+        "本次需要再扣减"
+      ],
+      "answer": 0,
+      "explanation": "SQL正常执行但更新零行，表示本次条件未满足，没有完成业务扣减；应反馈失败条件，不能当作扣减成功。"
+    },
+    "exercise": {
+      "task": "用两个psql会话证明最后一件库存只可扣一次。",
+      "steps": [
+        "启动PostgreSQL，在A按本课建schema和表。",
+        "A开启事务扣减后不提交；B开启事务执行同一UPDATE。",
+        "A提交；观察B为UPDATE 0，B提交，查询quantity并清理本课schema。"
+      ],
+      "expected": "A更新1行，B更新0行，最终quantity=0，没有超卖。",
+      "solution": "B等待A的行锁；A提交后，Read Committed下更新会重新检查当前行条件，quantity>0不成立。若A回滚，B有机会更新1行。实际API冲突应返回明确错误，不能盲目报告200。"
+    },
+    "sources": [
+      {
+        "title": "Spring Data JPA Locking",
+        "url": "https://docs.spring.io/spring-data/jpa/reference/jpa/locking.html"
+      },
+      {
+        "title": "PostgreSQL 并发控制",
+        "url": "https://www.postgresql.org/docs/current/transaction-iso.html"
+      }
+    ],
+    "lab": "独立双会话 PostgreSQL 实验；examples/task-service"
+  },
+  {
+    "id": 20,
+    "slug": "query-performance",
+    "title": "分页、索引与 N+1",
+    "phase": "03 · 数据库与事务",
+    "minutes": 35,
+    "prerequisites": [
+      "19"
+    ],
+    "goal": "从查询计划判断性能问题，并避免把数据库当作无限内存列表。",
+    "bridge": "前端无限滚动只显示少量内容，不代表后端只处理少量数据；分页与索引决定数据库实际工作量。",
+    "sections": [
+      {
+        "title": "分页必须有稳定顺序",
+        "html": "<p>没有ORDER BY的结果不承诺顺序；只有created_at排序而时间重复时，页面边界也不稳定。加入唯一键作为排序补充能让同一快照下的顺序确定。offset分页便于跳页，但深页需要跳过大量记录，数据插入和删除也会使页面漂移。游标分页从上一页最后的排序键继续，适合时间线，但仍需明确并发修改时的产品语义。</p><p>Spring Data的Page通常包含总数，可能触发count查询；Slice只回答是否还有下一段，可减少总数成本。客户端传入的size必须限上限，不允许一个“分页接口”被size=1000000绕成全量导出。本项目限制size在1..100，并使用更新时间和ID组合排序；稳定顺序不等于跨多次请求拥有同一数据库快照。</p><p class=\"source-note\">原始资料：<a href=\"https://www.postgresql.org/docs/current/using-explain.html\">PostgreSQL EXPLAIN</a>。</p>"
+      },
+      {
+        "title": "索引服务具体访问路径",
+        "html": "<p>B-tree索引适合多种等值、范围与排序访问，但不是每列加索引就更快。索引增加写入、存储和维护成本，组合索引列顺序也影响可用性。过滤条件、排序方式和返回列一起决定查询方案。先写实际SQL，再用接近真实规模的数据看计划，不用小表结果外推生产。</p><p>下面在psql创建临时数据，分别观察建索引前后计划。EXPLAIN ANALYZE会真的执行语句，尤其对UPDATE/DELETE不能当作只读命令随便用于生产。实验只执行SELECT并统计缓冲访问。优化器仍可选择顺序扫描，若它预计多数行都会命中，这可能正是合理选择。</p><pre><code>CREATE TEMP TABLE lab_events AS\nSELECT n AS id, n%100 AS owner_id, now()-n*interval &#x27;1 second&#x27; AS created_at\nFROM generate_series(1,50000) n;\nANALYZE lab_events;\nEXPLAIN (ANALYZE, BUFFERS)\nSELECT * FROM lab_events WHERE owner_id=7 ORDER BY created_at DESC,id DESC LIMIT 20;\nCREATE INDEX ON lab_events(owner_id,created_at DESC,id DESC);\nANALYZE lab_events;\nEXPLAIN (ANALYZE, BUFFERS)\nSELECT * FROM lab_events WHERE owner_id=7 ORDER BY created_at DESC,id DESC LIMIT 20;</code></pre><p class=\"source-note\">原始资料：<a href=\"https://docs.spring.io/spring-data/jpa/reference/jpa/query-methods.html\">Spring Data JPA Query Methods</a>。</p>"
+      },
+      {
+        "title": "N+1来自访问模式而非某个注解",
+        "html": "<p>先查20个任务，再循环为每个任务查用户，会产生1+20条SQL。ORM懒加载容易把额外查询隐藏在属性访问里，但手写JDBC也会制造相同问题。解决可选DTO投影、批量查询、适当join或entity graph，具体方案必须符合所需字段与分页语义。</p><p>给集合关联直接fetch join同时分页可能造成重复行、内存分页或其他意外，不能把“加一个fetch”当通用解药。先测SQL数量和行数，再选方案。缓存也不应作为掩盖糟糕查询的第一步，否则冷缓存仍然爆发。练习报告保留扫描方式、实际行数、缓冲读取与执行时间，同时注明测试数据规模。</p><p>读计划时区分估算行数与实际行数。如果估算偏差巨大，索引未被选择的原因可能是统计信息陈旧或列值分布不均。先更新统计并重新测量，再决定是否改变索引。缓存命中和预热会改变耗时，所以一次毫秒数不能作为唯一优化证据。</p><p class=\"source-note\">原始资料：<a href=\"https://docs.spring.io/spring-data/jpa/reference/jpa/query-methods.html\">Spring Data JPA Query Methods</a>。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "发现N+1之后，第一步最有价值的动作是？",
+      "options": [
+        "直接调大连接池",
+        "记录实际查询数",
+        "给所有列加索引"
+      ],
+      "answer": 1,
+      "explanation": "先测量查询模式，确认额外SQL来源，再选择批量加载或查询改写。"
+    },
+    "exercise": {
+      "task": "比较同一查询建索引前后的实际计划。",
+      "steps": [
+        "进入PostgreSQL专用学习库，在同一会话执行本课脚本。",
+        "记录两份计划中的扫描方式、排序节点、actual rows与Buffers。",
+        "说明结果为何适用本次50000行数据，而不能直接代表所有生产负载。"
+      ],
+      "expected": "能用执行计划解释差异，且不要求优化器固定选某个扫描名称。",
+      "solution": "对owner_id=7和倒序LIMIT20，组合索引通常减少扫描与排序；是否采用仍取决于统计和成本。若全表几乎都命中，顺序扫描可能更合理。N+1需要数查询，单条SQL快不代表整体请求快。"
+    },
+    "sources": [
+      {
+        "title": "PostgreSQL EXPLAIN",
+        "url": "https://www.postgresql.org/docs/current/using-explain.html"
+      },
+      {
+        "title": "Spring Data JPA Query Methods",
+        "url": "https://docs.spring.io/spring-data/jpa/reference/jpa/query-methods.html"
+      }
+    ],
+    "lab": "独立 PostgreSQL / psql 性能实验"
+  },
+  {
+    "id": 21,
+    "slug": "testcontainers",
+    "title": "用 Testcontainers 获得真实数据库证据",
+    "phase": "03 · 数据库与事务",
+    "minutes": 35,
+    "prerequisites": [
+      "20"
+    ],
+    "goal": "区分H2测试与PostgreSQL集成测试，并运行真实数据库约束实验。",
+    "bridge": "接口mock可以验证前端分支，却不能证明服务真的兼容上游；数据库替身也有相同局限。",
+    "sections": [
+      {
+        "title": "真实依赖回答替身回答不了的问题",
+        "html": "<p>H2适合无需外部服务的快速反馈，但PostgreSQL的UUID、时间类型、DDL、锁等待和SQL语法可能不同。Testcontainers在测试时启动指定镜像的真实服务，分配端口并在结束后清理，让测试更接近生产协议。它仍不是生产环境的完整复制：数据规模、网络拓扑、资源限制和多节点故障还需另外验证。</p><p>测试必须能说明究竟连到哪里。数据库容器启动成功但应用仍使用H2，属于无效证据。可验证数据库产品名、版本和连接URL，或者使用PostgreSQL专属行为作为断言。没有Docker时应明确报告该测试未运行，不把跳过包装成通过；需要这层证据的CI应把环境不可用视作失败。</p><p class=\"source-note\">原始资料：<a href=\"https://java.testcontainers.org/modules/databases/postgres/\">Testcontainers PostgreSQL Module</a>。</p>"
+      },
+      {
+        "title": "明确依赖与生命周期",
+        "html": "<p>Testcontainers 2使用更明确的模块名称，PostgreSQL模块为testcontainers-postgresql，包为org.testcontainers.postgresql。数据库驱动也要存在，容器库不会自动替你加上所有驱动。Spring Boot的@ServiceConnection可从容器推导连接信息，需要spring-boot-testcontainers测试依赖。</p><p>下面是独立JUnit实验的完整类，可作为学习增量添加到task-service测试目录；需先加入Testcontainers PostgreSQL测试依赖，版本遵循父POM的依赖管理。它不加载Spring，只验证真实PostgreSQL事务行为。已有同类测试时直接运行现有测试，避免重复创建。命名与依赖以项目最终README为准。</p><pre><code>package dev.learning.tasks;\n\nimport java.sql.DriverManager;\nimport org.junit.jupiter.api.Test;\nimport org.testcontainers.postgresql.PostgreSQLContainer;\nimport static org.junit.jupiter.api.Assertions.assertEquals;\n\nclass PostgreSqlRollbackTest {\n  @Test void rollbackRemovesInsertedRow() throws Exception {\n    try (var pg = new PostgreSQLContainer(&quot;postgres:17.11-alpine3.23&quot;)) {\n      pg.start();\n      try (var c = DriverManager.getConnection(pg.getJdbcUrl(), pg.getUsername(), pg.getPassword());\n           var sql = c.createStatement()) {\n        assertEquals(&quot;PostgreSQL&quot;, c.getMetaData().getDatabaseProductName());\n        sql.execute(&quot;create table proof(id integer primary key)&quot;);\n        c.setAutoCommit(false);\n        sql.executeUpdate(&quot;insert into proof values(1)&quot;);\n        c.rollback();\n        try (var result = sql.executeQuery(&quot;select count(*) from proof&quot;)) {\n          result.next();\n          assertEquals(0, result.getInt(1));\n        }\n      }\n    }\n  }\n}</code></pre><p class=\"source-note\">原始资料：<a href=\"https://docs.spring.io/spring-boot/reference/testing/testcontainers.html\">Spring Boot Testcontainers</a>。</p>"
+      },
+      {
+        "title": "从数据库实验扩展到应用事务测试",
+        "html": "<p>以上测试证明数据库回滚，却不能证明TaskService真的把两个写入放进同一事务。下一步应加载应用、指向容器数据库、触发用例并在第二步注入失败，随后在独立查询中验证tasks和outbox_events都没有部分结果。不要让测试自身的@Transactional掩盖服务遗漏的事务边界。</p><p>容器与Spring上下文都有生命周期，跨测试缓存上下文时，过早停止静态容器可能让后续测试持有失效连接。容器作为Spring测试Bean管理通常更容易保持生命周期一致。每条测试隔离数据，避免依赖执行顺序；镜像版本固定，升级时把迁移和锁行为重新纳入验证。</p><p>容器镜像下载失败属于环境或网络问题，测试断言失败才指向被测行为，二者应分开记录。CI可以预拉取镜像并复用下载缓存，但不能复用脏业务数据而破坏测试隔离。资源清理也应有界，异常退出后检查残留容器，不随意删除其他项目的容器。</p><p class=\"source-note\">原始资料：<a href=\"https://docs.spring.io/spring-boot/reference/testing/testcontainers.html\">Spring Boot Testcontainers</a>。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "容器启动成功，能够单独证明什么？",
+      "options": [
+        "应用的事务正确",
+        "数据库迁移正确",
+        "依赖容器已启动"
+      ],
+      "answer": 2,
+      "explanation": "还需证明应用真的连接容器，并通过针对迁移、约束和事务的行为断言。"
+    },
+    "exercise": {
+      "task": "运行真实PostgreSQL回滚测试，或明确记录环境缺口。",
+      "steps": [
+        "确认 docker info 成功；检查task-service是否已有等价Testcontainers测试与运行命令。",
+        "若没有，在测试范围添加org.testcontainers:testcontainers-postgresql并创建本课完整测试类；PostgreSQL驱动项目已提供。",
+        "运行 ./mvnw -f examples/task-service/pom.xml -Dtest=PostgreSqlRollbackTest test；记录测试是否实际执行。"
+      ],
+      "expected": "真实数据库产品名为PostgreSQL，插入回滚后count=0；缺少Docker必须报告未验证。",
+      "solution": "该测试将连接设为手动提交，插入后rollback，再查询零行。下一层应用测试需独立验证业务的事务代理、迁移和outbox原子性；不能由此单个数据库测试推断这些全部成立。"
+    },
+    "sources": [
+      {
+        "title": "Testcontainers PostgreSQL Module",
+        "url": "https://java.testcontainers.org/modules/databases/postgres/"
+      },
+      {
+        "title": "Spring Boot Testcontainers",
+        "url": "https://docs.spring.io/spring-boot/reference/testing/testcontainers.html"
+      }
+    ],
+    "lab": "examples/task-service：独立JUnit/Testcontainers教学增量"
+  },
+  {
+    "id": 22,
+    "slug": "security-filter-chain",
+    "title": "认证、授权与过滤器链",
+    "phase": "04 · 身份与 API 安全",
+    "minutes": 30,
+    "prerequisites": [
+      "21"
+    ],
+    "goal": "分清身份验证和权限判断，并对默认拒绝策略做验证。",
+    "bridge": "前端路由守卫用于体验，真正的权限边界必须在服务端，因为请求可以绕过页面直接发送。",
+    "sections": [
+      {
+        "title": "进入控制器之前就可能被拒绝",
+        "html": "<p>Spring Security基于Servlet过滤器链处理认证、授权及常见保护。认证回答当前是谁，授权回答这个身份能否执行这次操作。身份信息被组织为Authentication及其权限；控制器还没运行，请求就可能因缺少凭据被拒绝。因此在ControllerAdvice里找不到401的来源并不奇怪。</p><p>Basic认证把用户名密码按协议编码发送，编码不是加密，真实传输必须有TLS。课程本地reader和writer仅用于观察规则，内存账号不是生产账号体系。密码在服务端用专门的PasswordEncoder校验，不保存明文，更不把普通SHA摘要当作现代口令存储方案。</p><p class=\"source-note\">原始资料：<a href=\"https://docs.spring.io/spring-security/reference/servlet/architecture.html\">Spring Security Servlet Architecture</a>。</p>"
+      },
+      {
+        "title": "规则按实际路径和方法设计",
+        "html": "<p>本项目GET任务需要READER，POST和PATCH需要WRITER，其他未明确允许的路径默认denyAll。writer同时具有READER权限，因此可以读写；reader只有读取权限。公开健康检查与受限运维端点也应区分。路径匹配顺序重要，宽泛permitAll写在前面可能使后面的细规则失去预期作用。</p><p>角色一般映射到带ROLE_前缀的权限；hasRole(\"WRITER\")与hasAuthority(\"ROLE_WRITER\")有对应关系，但不能在hasRole里机械地重复加前缀。更细粒度业务权限可用方法级授权或明确服务检查，但注解不是资源所有权校验的替代。知道任务ID不意味着有权读取别人的任务。</p><pre><code>./mvnw -f examples/task-service/pom.xml spring-boot:run\n# 第二个终端：匿名与有效读取账号对比\ncurl -i http://localhost:8080/api/tasks\ncurl -i -u reader:reader-local-only http://localhost:8080/api/tasks\ncurl -i -u reader:wrong-password http://localhost:8080/api/tasks</code></pre><p class=\"source-note\">原始资料：<a href=\"https://docs.spring.io/spring-security/reference/servlet/authorization/authorize-http-requests.html\">Spring Security HTTP Authorization</a>。</p>"
+      },
+      {
+        "title": "测试拒绝路径时排除其他保护干扰",
+        "html": "<p>匿名读取通常触发401，错误密码也应拒绝，有效reader读取成功。测试reader写入权限时，必须同时提供有效CSRF token，否则可能先被CSRF拒绝，无法证明角色规则真的起作用。这类多个防线共同存在的场景，需要一次只改变一个条件，才能解释403由谁产生。</p><p>当前示例没有完整多租户和对象所有权模型，作为生产系统扩展时需要添加任务owner以及服务端关联验证。不要因为接口已经有SecurityFilterChain就宣称完整鉴权。练习产物是一张身份、方法、路径、预期结果的权限矩阵，后续每次新增路由都要补进去。</p><p>权限矩阵应包含允许和拒绝两组案例。新增接口最容易出现遗漏，因此默认拒绝能让未声明行为显式失败。默认拒绝只是安全基线，不能替代清晰产品权限定义；真正的要求来自谁能对哪份资源执行什么动作，并通过测试持续保持。</p><p class=\"source-note\">原始资料：<a href=\"https://docs.spring.io/spring-security/reference/servlet/authorization/authorize-http-requests.html\">Spring Security HTTP Authorization</a>。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "前端隐藏删除按钮能否构成后端权限控制？",
+      "options": [
+        "仍需服务端校验",
+        "已达到安全标准",
+        "只需路径更复杂"
+      ],
+      "answer": 0,
+      "explanation": "用户可绕过前端直接发HTTP请求，权限必须由服务端基于已认证身份判断。"
+    },
+    "exercise": {
+      "task": "运行认证矩阵，区分身份问题与角色问题。",
+      "steps": [
+        "启动task-service默认模式，不需要Redis或Kafka。",
+        "执行匿名GET、reader正确密码GET、reader错误密码GET。",
+        "阅读SecurityConfiguration，列出writer允许的HTTP方法与路径。"
+      ],
+      "expected": "匿名和错误凭据读取被拒绝；有效reader读取200；未知路由默认拒绝。",
+      "solution": "典型结果为401、200、401。POST的403还可能来自CSRF，需下一课用同一会话有效token消除该因素后再验证reader无写权限。生产补充资源所有权与审计。"
+    },
+    "sources": [
+      {
+        "title": "Spring Security Servlet Architecture",
+        "url": "https://docs.spring.io/spring-security/reference/servlet/architecture.html"
+      },
+      {
+        "title": "Spring Security HTTP Authorization",
+        "url": "https://docs.spring.io/spring-security/reference/servlet/authorization/authorize-http-requests.html"
+      }
+    ],
+    "lab": "examples/task-service"
+  },
+  {
+    "id": 23,
+    "slug": "session-csrf-cors",
+    "title": "Session、CSRF 与 CORS",
+    "phase": "04 · 身份与 API 安全",
+    "minutes": 35,
+    "prerequisites": [
+      "22"
+    ],
+    "goal": "用同一会话完成合法写请求，并说明CSRF与跨域的不同边界。",
+    "bridge": "浏览器自动携带Cookie让登录方便，也使跨站伪造请求有机会借用你的身份；跨域策略又是另一套浏览器规则。",
+    "sections": [
+      {
+        "title": "自动携带凭据带来的风险",
+        "html": "<p>Session将部分登录状态保存在服务器，浏览器通过Cookie引用会话。CSRF攻击利用浏览器会向目标站点自动发送凭据的特点，诱导用户访问恶意页面后提交状态修改请求。防护需要验证攻击者无法取得的token或采用经过审查的其他机制；不能因为接口叫REST就关闭CSRF。</p><p>Basic凭据也可能被浏览器缓存并自动携带，所以本项目保留CSRF。SameSite Cookie能减少一些跨站场景，但不替代所有应用边界分析。HttpOnly帮助阻止脚本直接读取Cookie，却不阻止浏览器自动发送；Secure限制HTTPS传输，三者解决的问题不同。XSS仍可在同源上下文做很多事情，应单独防护。</p><p class=\"source-note\">原始资料：<a href=\"https://docs.spring.io/spring-security/reference/servlet/exploits/csrf.html\">Spring Security CSRF</a>。</p>"
+      },
+      {
+        "title": "让token与会话保持一致",
+        "html": "<p>本项目GET /api/csrf返回headerName和token，同时可能建立会话Cookie。后续POST需要带回同一Cookie，并按返回的headerName发送token。只复制token而丢掉会话，会导致服务器找不到对应的期望值。不要将CSRF token误认为登录令牌，它不替代用户名密码或其他认证信息。</p><p>下面使用curl、临时Cookie文件和Python标准库完成流程。演示账号仅适用于本机学习服务。故意省略token时预期403；保留同一Cookie并提供token时writer可以创建任务。变更用户或重新登录后按应用流程重新获取token，不把某次采集的值永久硬编码进前端。</p><pre><code>learning_cookie=$(mktemp)\nlearning_csrf=$(curl -fsS -u writer:writer-local-only -c &quot;$learning_cookie&quot; \\\n  http://localhost:8080/api/csrf)\nlearning_header=$(printf %s &quot;$learning_csrf&quot; | python3 -c &#x27;import json,sys; print(json.load(sys.stdin)[&quot;headerName&quot;])&#x27;)\nlearning_token=$(printf %s &quot;$learning_csrf&quot; | python3 -c &#x27;import json,sys; print(json.load(sys.stdin)[&quot;token&quot;])&#x27;)\ncurl -i -u writer:writer-local-only -b &quot;$learning_cookie&quot; \\\n  -H &quot;$learning_header: $learning_token&quot; -H &quot;Content-Type: application/json&quot; \\\n  --data &#x27;{&quot;title&quot;:&quot;验证CSRF&quot;}&#x27; http://localhost:8080/api/tasks\nrm &quot;$learning_cookie&quot;</code></pre><p class=\"source-note\">原始资料：<a href=\"https://docs.spring.io/spring-security/reference/servlet/integrations/cors.html\">Spring Security CORS</a>。</p>"
+      },
+      {
+        "title": "CORS不等于认证，也不等于CSRF",
+        "html": "<p>CORS告诉浏览器哪些来源允许读取跨域响应，预检请求通常不携带登录Cookie，所以CORS处理需要在Security正确的位置完成。配置精确来源、允许的方法和头，携带凭据时不能随意使用通配来源。curl不执行浏览器CORS限制，curl成功不代表前端跨域一定成功。</p><p>攻击者仍可用非浏览器客户端发请求，因此CORS不是服务端认证。某些跨站请求可以被发送但响应不可读，业务修改仍可能发生，所以也不能把CORS当作CSRF替代。本地联调可采用开发代理保持浏览器同源，或明确配置受信任源；不要遇到403就一口气关闭CSRF、授权和CORS检查。</p><p>同源由协议、主机和端口共同决定，因此本机8080与前端开发端口也属于不同源。所谓同站点又是Cookie语义中的另一概念，别把二者混用。调试时记录页面Origin和实际请求目标，再看预检响应，不要只因为两边都写localhost就推断无需CORS。</p><p class=\"source-note\">原始资料：<a href=\"https://docs.spring.io/spring-security/reference/servlet/integrations/cors.html\">Spring Security CORS</a>。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "CORS配置主要约束哪件事？",
+      "options": [
+        "所有客户端访问",
+        "浏览器跨域读取",
+        "数据库事务提交"
+      ],
+      "answer": 1,
+      "explanation": "CORS由浏览器执行，不能替代认证、授权或CSRF保护。"
+    },
+    "exercise": {
+      "task": "证明CSRF token与会话配套，并单独验证reader写权限。",
+      "steps": [
+        "先用writer直接POST不带token，记录403。",
+        "执行完整token与Cookie流程，确认创建成功。",
+        "重新用reader获取自己的Cookie和token，再POST合法title，确认仍被拒绝。"
+      ],
+      "expected": "writer无token为403，有匹配token成功；reader即使token正确也为403。",
+      "solution": "第一种失败由CSRF造成；第二种通过证明会话与token配套；第三种在有效认证和CSRF前提下仍失败，才支持“reader没有WRITER权限”的结论。CORS实验必须用真实浏览器来源验证。"
+    },
+    "sources": [
+      {
+        "title": "Spring Security CSRF",
+        "url": "https://docs.spring.io/spring-security/reference/servlet/exploits/csrf.html"
+      },
+      {
+        "title": "Spring Security CORS",
+        "url": "https://docs.spring.io/spring-security/reference/servlet/integrations/cors.html"
+      }
+    ],
+    "lab": "examples/task-service"
+  },
+  {
+    "id": 24,
+    "slug": "oauth-oidc-jwt",
+    "title": "OAuth2、OIDC 与 JWT 资源服务器",
+    "phase": "04 · 身份与 API 安全",
+    "minutes": 35,
+    "prerequisites": [
+      "23"
+    ],
+    "goal": "画清身份提供方、客户端和API的职责，并识别JWT验证缺口。",
+    "bridge": "前端拿到一个token不代表可以自己判断用户可信；API必须独立验证令牌并执行资源权限规则。",
+    "sections": [
+      {
+        "title": "先分清协议、角色与格式",
+        "html": "<p>OAuth2关注授权，OIDC在其上增加身份层，JWT是一种可承载声明的令牌格式。三者不是同义词。客户端让用户到身份提供方登录并获得授权，资源服务器接收访问令牌并保护API；ID Token面向客户端表达登录身份，不应直接当作所有API的访问凭据。</p><p>JWT的header和payload通常只是Base64URL编码，任何持有者都能读取，不能在里面放密码或其他需要保密的内容。签名提供完整性和发行者信任判断，不等于加密。把JWT拆成三段并解析出用户名，只证明读到了文本，远没有证明令牌真实有效。</p><p class=\"source-note\">原始资料：<a href=\"https://docs.spring.io/spring-security/reference/servlet/oauth2/resource-server/jwt.html\">Spring Security JWT Resource Server</a>。</p>"
+      },
+      {
+        "title": "资源服务器验证哪些东西",
+        "html": "<p>Spring Security的资源服务器支持验证签名、有效期和发行者等条件，并把声明映射到权限。配置issuer-uri能从受信任发行者发现密钥；audience仍应按你的API明确校验，避免接受签给其他资源的令牌。还需考虑允许算法、密钥轮换、时钟偏差和失败时拒绝访问，不能接受令牌header自称的任意算法。</p><p>下列是独立扩展配置草案，本项目默认Basic模式没有身份提供方，不会凭这段配置自动获得登录系统。Boot4可使用spring-boot-starter-security-oauth2-resource-server及对应配置。真正接入前先确定发行者、API audience、scope命名和前端授权流程，再添加明确测试。</p><pre><code># 独立OAuth2资源服务器配置草案，示例域名不能直接运行\nspring:\n  security:\n    oauth2:\n      resourceserver:\n        jwt:\n          issuer-uri: https://idp.example.test/realms/learning\n          audiences: learning-api\n\n# 请求方式：令牌由受信任授权服务器颁发\n# Authorization: Bearer &lt;access-token&gt;</code></pre><p class=\"source-note\">原始资料：<a href=\"https://openid.net/specs/openid-connect-core-1_0.html\">OpenID Connect Core</a>。</p>"
+      },
+      {
+        "title": "前端流程与服务端授权各守边界",
+        "html": "<p>浏览器公共客户端通常使用Authorization Code并结合PKCE；不能把长期client secret打包进前端，因为用户可以读取所有前端资源。重定向URI应精确登记，使用state与OIDC nonce等机制按所选库和协议要求保护流程。令牌如何保管需结合XSS、CSRF与后端代理架构决定，不存在对所有产品都正确的一句“放localStorage”。</p><p>一个有效JWT也不代表可以访问任何taskId。scope、角色和资源所有权仍需服务端授权。纯Bearer API若确实只接受显式Authorization头、完全不依赖浏览器自动凭据，才可在明确边界内评估CSRF配置；不能把该结论套到当前Basic或Cookie接口。注销、吊销、短期令牌和密钥失效还需生命周期设计。</p><p class=\"source-note\">原始资料：<a href=\"https://www.rfc-editor.org/rfc/rfc9700.html\">OAuth 2.0 Security Best Current Practice</a>。</p>"
+      },
+      {
+        "title": "用验证矩阵定义接入完成",
+        "html": "<p>接入不能只测一个正常token。至少要验证缺失、过期、错误发行者、错误audience、篡改签名、scope不足和跨用户资源访问。前四类通常应拒绝认证，scope不足应拒绝授权；具体响应按合同稳定处理。记录这张矩阵能让你在身份平台变更、密钥轮换或后端扩容时重复验证。</p><p>本课的基础练习是可离线执行的令牌解析与威胁判断；真实IdP接入为挑战任务，需要你提供或搭建受控身份服务。课程不会假装示例域名已经可用，也不会鼓励自己手写密码认证、签名算法或OAuth完整流程。优先使用经过维护的标准实现，把精力放到正确配置和业务权限。</p><pre><code>jshell\n// 仅演示编码可读性，绝不把它当签名验证\nvar payload = &quot;{\\&quot;sub\\&quot;:\\&quot;learner\\&quot;,\\&quot;aud\\&quot;:\\&quot;learning-api\\&quot;}&quot;;\nvar encoded = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(payload.getBytes(java.nio.charset.StandardCharsets.UTF_8));\nSystem.out.println(new String(java.util.Base64.getUrlDecoder().decode(encoded),\n    java.nio.charset.StandardCharsets.UTF_8));</code></pre><p class=\"source-note\">原始资料：<a href=\"https://www.rfc-editor.org/rfc/rfc9700.html\">OAuth 2.0 Security Best Current Practice</a>。</p>"
+      }
+    ],
+    "quiz": {
+      "question": "把JWT payload解码成功能够证明什么？",
+      "options": [
+        "签名来自可信方",
+        "持有人拥有权限",
+        "声明文本可读取"
+      ],
+      "answer": 2,
+      "explanation": "Base64URL解码不验证签名、发行者、过期或权限，任何人都能构造相似文本。"
+    },
+    "exercise": {
+      "task": "完成离线令牌实验和资源服务器验收矩阵。",
+      "steps": [
+        "在jshell运行编码与解码示例，确认声明内容可读。",
+        "列出错误签名、过期、错误issuer、错误audience、scope不足的预期结果。",
+        "画出浏览器→身份提供方→浏览器→API路径，分别标出ID Token与Access Token的用途。"
+      ],
+      "expected": "能说明解析不等于验证，且API仍需检查scope与资源所有权。",
+      "solution": "错误签名/过期/issuer或audience不符应拒绝认证，scope不足应拒绝授权。ID Token面向客户端的登录身份，Access Token面向受保护API。真实接入未执行前只记录设计完成，不能记为OAuth集成已验证。"
+    },
+    "sources": [
+      {
+        "title": "Spring Security JWT Resource Server",
+        "url": "https://docs.spring.io/spring-security/reference/servlet/oauth2/resource-server/jwt.html"
+      },
+      {
+        "title": "OpenID Connect Core",
+        "url": "https://openid.net/specs/openid-connect-core-1_0.html"
+      },
+      {
+        "title": "OAuth 2.0 Security Best Current Practice",
+        "url": "https://www.rfc-editor.org/rfc/rfc9700.html"
+      }
+    ],
+    "lab": "独立 jshell 实验；OAuth2资源服务器接入设计"
+  }
+]
